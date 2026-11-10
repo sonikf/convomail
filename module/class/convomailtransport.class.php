@@ -265,7 +265,11 @@ class ConvomailTransport
 		global $langs;
 
 		if (!empty($account->server_saves_sent)) {
-			// The mail server stores its own copy of what it sends (Microsoft 365, Gmail); a second copy would be a duplicate
+			// The mail server stores its own copy of what it sends (Microsoft 365, Gmail); a second copy would be a duplicate.
+			// On any other server the box may be wrong and the email would be in no Sent folder at all, so say so.
+			if (!preg_match(ConvomailAccount::SAVES_SENT_HOSTS, trim((string) $account->smtp_host))) {
+				$this->warnings[] = $langs->trans('ConvomailWarningSentCopySkipped');
+			}
 			return;
 		}
 		if ($rawmime === '') {

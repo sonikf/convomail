@@ -643,6 +643,10 @@ function convomail_account_form_script($iscreate)
 			$("[name=server_saves_sent]").prop("checked", !!p.server_saves_sent);
 		}
 		$("#convomail_preset").on("change", function () { applyPreset($(this).val()); });
+		// A preset ticks the box; typing another server over it must not leave that server without Sent copies
+		$("[name=smtp_host]").on("change", function () {
+			if (!'.ConvomailAccount::SAVES_SENT_HOSTS.'.test($.trim($(this).val()))) { $("[name=server_saves_sent]").prop("checked", false); }
+		});
 		function onMethod(firsttime) {
 			var m = $("#auth_method").val() || "password";
 			$(".cm-password-row").toggle(m === "password");

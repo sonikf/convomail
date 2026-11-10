@@ -61,6 +61,7 @@ ConvomailErrorHostNotAllowed = The server %s is not allowed. An administrator ca
 ConvomailWarningNoRawMessage = The email was sent, but no copy could be saved to your Sent folder.
 ConvomailWarningSentFolderNotFound = No Sent folder found on the IMAP server. %s
 ConvomailWarningSentCopyFailed = The email was sent, but saving a copy to your Sent folder failed: %s
+ConvomailWarningSentCopySkipped = The email was sent. Convomail saved no copy to your Sent folder, because this mail account has "Server saves sent mail itself" ticked. If the email is not in your Sent folder, untick it in the account's settings.
 
 # Mailbox
 Mailbox = Mailbox
@@ -248,7 +249,7 @@ ConvomailNoProjectEmails = No email logged on this project yet. Emails sent from
 ConvomailReceived = Received
 ConvomailSentShort = Sent
 ConvomailServerSavesSent = Server saves sent mail itself
-ConvomailServerSavesSentHelp = Tick this when your mail server already keeps a copy of what you send in its Sent folder (Microsoft 365 and Gmail do), so Convomail does not add a second copy.
+ConvomailServerSavesSentHelp = Tick this only when your mail server keeps its own copy of what you send (Microsoft 365 and Gmail do), so Convomail does not add a second one. Most hosting mail servers do not: leave it unticked there, or sent emails will be missing from your Sent folder.
 
 # Read receipts and open tracking
 ConvomailReceipts = Receipts

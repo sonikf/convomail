@@ -39,6 +39,9 @@ class ConvomailAccount extends CommonObject
 	private static $accessCache = array();
 	const AUTH_OAUTH = 'oauth';
 
+	/** SMTP hosts known to keep their own Sent copy. Also printed as a JavaScript regular expression on the account form */
+	const SAVES_SENT_HOSTS = '/(^|\.)(gmail|googlemail|office365|outlook)\.com$/i';
+
 	/**
 	 * @var array<string,array<string,mixed>> Field definitions used by the *Common() methods
 	 */
