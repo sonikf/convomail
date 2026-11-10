@@ -301,6 +301,19 @@
 	document.addEventListener('DOMContentLoaded', function () {
 		document.querySelectorAll('input[data-cm-addresses]').forEach(bindAddressAutocomplete);
 
+		// The browser stops a send without recipient or subject before anything leaves: the server refuses it too,
+		// but its answer is a new page, and picked files can't be put back in a file field. Cancel skips the check.
+		var subject = field('subject');
+		if (subject && subject.form) {
+			[field('sendto'), subject].forEach(function (input) {
+				if (input) {
+					input.required = true;
+					input.pattern = '.*\\S.*';	// not just spaces
+				}
+			});
+			subject.form.querySelectorAll('[name="cancel"]').forEach(function (b) { b.formNoValidate = true; });
+		}
+
 		var chips = document.getElementById('cm-projectcontacts');
 		if (chips) {
 			bindChips(chips);
