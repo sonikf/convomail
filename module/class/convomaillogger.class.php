@@ -44,7 +44,8 @@ class ConvomailLogger
 	 * @param  User                $user    Sender
 	 * @param  ConvomailAccount    $account Account used
 	 * @param  array<string,mixed> $data    Keys: msgid, in_reply_to, subject, body, to, cc, bcc, socid,
-	 *                                      contactids (int[]), projectid, origin, originid,
+	 *                                      contactids (int[]), userids (int[], attendees besides the sender),
+	 *                                      projectid, origin, originid,
 	 *                                      files (array of array('path','name')), sent_folder, sent_uid,
 	 *                                      read_receipt (0/1), track_key (open-tracking key or '')
 	 * @return int                          Event id if OK, <0 if KO
@@ -82,6 +83,15 @@ class ConvomailLogger
 		foreach ((array) ($data['contactids'] ?? array()) as $contactid) {
 			if ((int) $contactid > 0) {
 				$event->socpeopleassigned[(int) $contactid] = (int) $contactid;
+			}
+		}
+		// Core only adds the owner when no one is assigned: list the sender first, then the other users
+		if (!empty($data['userids'])) {
+			$event->userassigned = array($user->id => array('id' => $user->id));
+			foreach ((array) $data['userids'] as $userid) {
+				if ((int) $userid > 0) {
+					$event->userassigned[(int) $userid] = array('id' => (int) $userid);
+				}
 			}
 		}
 

@@ -357,6 +357,38 @@ function convomail_format_addresses(array $list, $withemail = false)
 }
 
 /**
+ * Users picked in "Copy to user(s)" / "Bcc to user(s)": each address must be an active employee's, the same users
+ * core's mail form offers (core/tpl/card_presend.tpl.php)
+ *
+ * @param  DoliDB          $db      Database
+ * @param  string          $list    Addresses as typed or picked
+ * @param  string[]        $unknown Addresses that are no such user's
+ * @param  int[]           $ids     Ids of the users found
+ * @return string                   "Name <email>" list, to add to Cc or Bcc
+ */
+function convomail_user_addresses($db, $list, &$unknown, &$ids)
+{
+	$unknown = array();
+	$ids = array();
+	$out = array();
+	foreach (ConvomailMatcher::parseAddresses($list) as $email) {
+		$sql = "SELECT rowid, firstname, lastname, email FROM ".MAIN_DB_PREFIX."user";
+		$sql .= " WHERE entity IN (".getEntity('user').") AND statut = 1 AND employee = 1";
+		$sql .= " AND (fk_soc IS NULL OR fk_soc = 0) AND LOWER(email) = '".$db->escape($email)."'";
+		$resql = $db->query($sql);
+		$obj = $resql ? $db->fetch_object($resql) : null;
+		if (!$obj) {
+			$unknown[] = $email;
+			continue;
+		}
+		$ids[] = (int) $obj->rowid;
+		$name = trim(str_replace(array('"', '<', '>', ','), '', dolGetFirstLastname($obj->firstname, $obj->lastname)));
+		$out[] = $name !== '' ? $name.' <'.$obj->email.'>' : $obj->email;
+	}
+	return implode(', ', $out);
+}
+
+/**
  * Replace pasted images (src="data:...") by a short [image] text, for copies kept in the agenda
  *
  * @param  string $html HTML

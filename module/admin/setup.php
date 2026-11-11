@@ -192,6 +192,10 @@ print '<tr class="oddeven"><td>'.$langs->trans('ConvomailReadReceiptDefault').'<
 print '<td>'.ajax_constantonoff('CONVOMAIL_READ_RECEIPT_DEFAULT').'</td>';
 print '<td class="opacitymedium">'.$langs->trans('ConvomailReadReceiptDefaultDesc').'</td></tr>';
 
+print '<tr class="oddeven"><td>'.$langs->trans('ConvomailUsersAsAttendees').'</td>';
+print '<td>'.ajax_constantonoff('CONVOMAIL_USERS_AS_ATTENDEES').'</td>';
+print '<td class="opacitymedium">'.$langs->trans('ConvomailUsersAsAttendeesDesc').'</td></tr>';
+
 print '<tr class="oddeven"><td>'.$langs->trans('ConvomailOpenTracking').'</td>';
 print '<td>'.ajax_constantonoff('CONVOMAIL_OPEN_TRACKING').'</td>';
 print '<td class="opacitymedium">'.$langs->trans('ConvomailOpenTrackingDesc', dol_buildpath('/convomail/public/open.php', 2)).'</td></tr>';

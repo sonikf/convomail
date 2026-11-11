@@ -158,6 +158,10 @@ function convomail_back_url($socid, $projectid, $eventid = 0)
 $sendto = trim(GETPOST('sendto', 'alphawithlgt'), " ,;");
 $sendtocc = trim(GETPOST('sendtocc', 'alphawithlgt'), " ,;");
 $sendtobcc = trim(GETPOST('sendtobcc', 'alphawithlgt'), " ,;");
+// "Copy to user(s)" / "Bcc to user(s)": shown, like in core's mail form, when the email setup lets users be picked
+$withuserdest = getDolGlobalString('MAIN_MAIL_ENABLED_USER_DEST_SELECT') !== '';
+$sendtoccuser = $withuserdest ? trim(GETPOST('sendtoccuser', 'alphawithlgt'), " ,;") : '';
+$sendtobccuser = $withuserdest ? trim(GETPOST('sendtobccuser', 'alphawithlgt'), " ,;") : '';
 $subject = GETPOST('subject', 'alphanohtml');
 // HTML goes through core's sanitizer. Plain text (editor off) is read raw because that sanitizer
 // collapses its line breaks; it is escaped before use, so it can never carry markup.
@@ -334,7 +338,22 @@ if ($action == 'send') {
 		$error++;
 	}
 
-	$recipients = array_merge(ConvomailMatcher::parseAddresses($sendto), ConvomailMatcher::parseAddresses($sendtocc), ConvomailMatcher::parseAddresses($sendtobcc));
+	// Picked users join Cc / Bcc for sending and the event; the fields keep them apart if the form comes back
+	$ccusers = convomail_user_addresses($db, $sendtoccuser, $unknowncc, $ccuserids);
+	$bccusers = convomail_user_addresses($db, $sendtobccuser, $unknownbcc, $bccuserids);
+	// Off by default: each copied user would get every such email on their own agenda. Never Bcc users: the event
+	// hides its Bcc, but shows its attendees to everyone who can open it.
+	$attendeeids = getDolGlobalInt('CONVOMAIL_USERS_AS_ATTENDEES') ? $ccuserids : array();
+	foreach (array('MailToCCUsers' => $unknowncc, 'ConvomailBccToUsers' => $unknownbcc) as $label => $unknown) {
+		if ($unknown) {
+			setEventMessages($langs->trans('ConvomailNotAUser', $langs->transnoentitiesnoconv($label), implode(', ', $unknown)), null, 'errors');
+			$error++;
+		}
+	}
+	$mailcc = implode(', ', array_filter(array($sendtocc, $ccusers)));
+	$mailbcc = implode(', ', array_filter(array($sendtobcc, $bccusers)));
+
+	$recipients = array_merge(ConvomailMatcher::parseAddresses($sendto), ConvomailMatcher::parseAddresses($mailcc), ConvomailMatcher::parseAddresses($mailbcc));
 	if (empty(ConvomailMatcher::parseAddresses($sendto))) {
 		setEventMessages($langs->trans('ErrorFieldRequired', $langs->transnoentitiesnoconv('MailTo')), null, 'errors');
 		$error++;
@@ -462,8 +481,8 @@ if ($action == 'send') {
 		$transport = new ConvomailTransport($db);
 		$result = $transport->send($account, array(
 			'to'             => $sendto,
-			'cc'             => $sendtocc,
-			'bcc'            => $sendtobcc,
+			'cc'             => $mailcc,
+			'bcc'            => $mailbcc,
 			'subject'        => $subject,
 			'body'           => $body,
 			'files'          => $files,
@@ -484,10 +503,11 @@ if ($action == 'send') {
 				'subject'     => $subject,
 				'body'        => convomail_strip_data_images($body),
 				'to'          => $sendto,
-				'cc'          => $sendtocc,
-				'bcc'         => $sendtobcc,
+				'cc'          => $mailcc,
+				'bcc'         => $mailbcc,
 				'socid'       => $socid,
 				'contactids'  => $contactids,
+				'userids'     => $attendeeids,
 				'projectid'   => $projectid,
 				'origin'      => $origin,
 				'originid'    => $originid,
@@ -589,7 +609,13 @@ if ($projectid > 0) {
 }
 print '</div></td></tr>';
 print '<tr><td>'.$langs->trans('MailCC').'</td><td><input type="text" name="sendtocc" class="quatrevingtpercent" value="'.dol_escape_htmltag($sendtocc).'"'.$acattr.'></td></tr>';
+if ($withuserdest) {
+	print '<tr><td>'.$langs->trans('MailToCCUsers').'</td><td><input type="text" name="sendtoccuser" class="quatrevingtpercent" value="'.dol_escape_htmltag($sendtoccuser).'"'.$acattr.' data-cm-only="user"></td></tr>';
+}
 print '<tr><td>'.$langs->trans('MailCCC').'</td><td><input type="text" name="sendtobcc" class="quatrevingtpercent" value="'.dol_escape_htmltag($sendtobcc).'"'.$acattr.'></td></tr>';
+if ($withuserdest) {
+	print '<tr><td>'.$langs->trans('ConvomailBccToUsers').'</td><td><input type="text" name="sendtobccuser" class="quatrevingtpercent" value="'.dol_escape_htmltag($sendtobccuser).'"'.$acattr.' data-cm-only="user"></td></tr>';
+}
 
 print '<tr><td>'.$langs->trans('ThirdParty').'</td><td>';
 print img_picto('', 'company', 'class="pictofixedwidth"').$form->select_company($socid, 'socid', '', 1, 0, 0, array(), 0, 'minwidth300');

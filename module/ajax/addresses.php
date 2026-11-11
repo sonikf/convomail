@@ -12,12 +12,13 @@
  * \ingroup convomail
  * \brief   Address suggestions for the To / Cc / Bcc fields of compose. JSON.
  *
- * GET parameters: term (at least 2 characters)
+ * GET parameters: term (at least 2 characters), only=user for the "Copy to user(s)" / "Bcc to user(s)" fields
  * Returns up to 15 entries {value: "Name <email>", name, email, kind: contact|thirdparty|user|recent, detail}:
  * known records first, then addresses from the user's own email events.
  * Contacts and third parties follow core's visibility rules (sales representative restriction, private
  * contacts, external users); users need the user read right; recent addresses come from the user's own
- * email events.
+ * email events. With only=user: active employees only, as core's own user recipient lists; core shows those
+ * to anyone who can send mail when MAIN_MAIL_ENABLED_USER_DEST_SELECT is on, so that setting also opens them here.
  */
 
 if (!defined('NOTOKENRENEWAL')) {
@@ -65,6 +66,7 @@ if (dol_strlen($term) < 2) {
 }
 
 $max = 15;
+$onlyusers = GETPOST('only', 'aZ09') === 'user';
 $like = "'%".$db->escape($db->escapeforlike($term))."%'";
 $found = array();	// lowercase email => entry, first source wins
 
@@ -95,7 +97,7 @@ $external = !empty($user->socid);
 $seeall = $user->hasRight('societe', 'client', 'voir') && !$external;
 
 // Contacts
-if (isModEnabled('societe') && $user->hasRight('societe', 'contact', 'lire')) {
+if (!$onlyusers && isModEnabled('societe') && $user->hasRight('societe', 'contact', 'lire')) {
 	$sql = "SELECT sp.firstname, sp.lastname, sp.email, s.nom as socname";
 	$sql .= " FROM ".MAIN_DB_PREFIX."socpeople as sp";
 	$sql .= " LEFT JOIN ".MAIN_DB_PREFIX."societe as s ON s.rowid = sp.fk_soc";
@@ -117,7 +119,7 @@ if (isModEnabled('societe') && $user->hasRight('societe', 'contact', 'lire')) {
 }
 
 // Third parties
-if (count($found) < $max && isModEnabled('societe') && $user->hasRight('societe', 'lire')) {
+if (!$onlyusers && count($found) < $max && isModEnabled('societe') && $user->hasRight('societe', 'lire')) {
 	$sql = "SELECT s.nom, s.email FROM ".MAIN_DB_PREFIX."societe as s";
 	$sql .= " WHERE s.entity IN (".getEntity('societe').")";
 	$sql .= " AND s.status = 1 AND s.email <> ''";
@@ -136,10 +138,13 @@ if (count($found) < $max && isModEnabled('societe') && $user->hasRight('societe'
 }
 
 // Colleagues
-if (count($found) < $max && !$external && $user->hasRight('user', 'user', 'lire')) {
+if (count($found) < $max && !$external && ($user->hasRight('user', 'user', 'lire') || ($onlyusers && getDolGlobalString('MAIN_MAIL_ENABLED_USER_DEST_SELECT')))) {
 	$sql = "SELECT u.firstname, u.lastname, u.email FROM ".MAIN_DB_PREFIX."user as u";
 	$sql .= " WHERE u.entity IN (".getEntity('user').")";
 	$sql .= " AND u.statut = 1 AND u.email <> '' AND (u.fk_soc IS NULL OR u.fk_soc = 0)";
+	if ($onlyusers) {
+		$sql .= " AND u.employee = 1";
+	}
 	$sql .= " AND (u.email LIKE ".$like." OR u.lastname LIKE ".$like." OR u.firstname LIKE ".$like." OR CONCAT(u.firstname, ' ', u.lastname) LIKE ".$like.")";
 	$sql .= " ORDER BY u.lastname, u.firstname";
 	$sql .= $db->plimit($max);
@@ -150,7 +155,7 @@ if (count($found) < $max && !$external && $user->hasRight('user', 'user', 'lire'
 }
 
 // Addresses the user has written to or received from (own email events)
-if (count($found) < $max && isModEnabled('agenda')) {
+if (!$onlyusers && count($found) < $max && isModEnabled('agenda')) {
 	$sql = "SELECT a.email_from, a.email_to, a.email_tocc";
 	$sql .= " FROM ".MAIN_DB_PREFIX."actioncomm as a";
 	$sql .= " WHERE a.entity IN (".getEntity('agenda').")";

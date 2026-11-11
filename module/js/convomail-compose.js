@@ -257,6 +257,7 @@
 			return;
 		}
 		var url = input.getAttribute('data-cm-addresses');
+		var only = input.getAttribute('data-cm-only') || '';
 		var kinds = {};
 		try { kinds = JSON.parse(input.getAttribute('data-cm-kinds') || '{}'); } catch (e) { kinds = {}; }
 		$(input).on('keydown', function (ev) {
@@ -274,7 +275,7 @@
 					response([]);
 					return;
 				}
-				$.getJSON(url, { term: term }).done(function (data) { response(Array.isArray(data) ? data : []); }).fail(function () { response([]); });
+				$.getJSON(url, only ? { term: term, only: only } : { term: term }).done(function (data) { response(Array.isArray(data) ? data : []); }).fail(function () { response([]); });
 			},
 			focus: function () { return false; },
 			select: function (ev, ui) {
