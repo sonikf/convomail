@@ -1,7 +1,7 @@
 /* Convomail top-bar unread indicator (every page) */
-.cm-topunread-wrap { position: relative; vertical-align: middle; margin-right: 10px; }	/* room for the bubble, which sticks out on the right */
+.cm-topunread-wrap { position: relative; margin-right: 10px; }	/* room for the bubble, which sticks out on the right */
 .cm-topunread-wrap[hidden] { display: none; }
-.cm-topunread { position: relative; display: inline-block; padding: 0 3px 0 4px; line-height: 25px; }	/* as core's .login_block_elem */
+.cm-topunread { position: relative; display: inline-block; }	/* inside core's .login_block_elem, which gives the line height */
 .cm-topunread.cm-topunread-failed .fa { opacity: .5; }
 .cm-topunread-count { position: absolute; top: -2px; right: -9px; min-width: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: #d93025; color: #fff; font-size: 9px; font-weight: bold; line-height: 14px; text-align: center; white-space: nowrap; pointer-events: none; }
 .cm-topunread-count[hidden] { display: none; }

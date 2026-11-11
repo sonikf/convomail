@@ -77,13 +77,16 @@ class ActionsConvomail
 			'marking'  => $langs->transnoentitiesnoconv('ConvomailUnreadMarking'),
 			'markconfirm' => $langs->transnoentitiesnoconv($contacts ? 'ConvomailUnreadMarkConfirmContacts' : 'ConvomailUnreadMarkConfirmAll', '%s'),
 		);
+		// The link sits in core's login_block_elem box, as core's own top bar icons do, so it lines up with them.
 		$h = '<div class="inline-block cm-topunread-wrap">';
+		$h .= '<div class="inline-block login_block_elem" style="padding: 0px; padding-right: 2px;">';
 		$h .= '<a class="cm-topunread login-dropdown-a nofocusvisible" href="'.dol_escape_htmltag(dol_buildpath('/convomail/mailbox.php', 1).'?role=inbox').'"';
 		$h .= ' data-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/unread.php', 1)).'" data-token="'.newToken().'"';
 		$h .= ' data-preview="'.(ConvomailUnread::preview($user) ? 1 : 0).'" data-interval="'.max(60, convomail_poll_interval() ?: 120).'"';
 		$h .= ' data-settings="'.dol_escape_htmltag(dol_buildpath('/convomail/user_accounts.php', 1).'?id='.((int) $user->id).'#cm-unread-settings').'"';
 		$h .= ' data-texts="'.dol_escape_htmltag(json_encode($texts)).'" title="'.dol_escape_htmltag($texts['title']).'" aria-haspopup="true" aria-expanded="false">';
-		$h .= '<i class="fa fa-envelope"></i><span class="cm-topunread-count" hidden></span></a>';
+		$h .= '<span class="fa fa-envelope atoplogin valignmiddle"></span><span class="cm-topunread-count" hidden></span></a>';
+		$h .= '</div>';
 		$h .= '<div class="cm-topunread-menu" hidden></div>';
 		$h .= '</div>';
 		$h .= convomail_assets(array('/convomail/css/convomail-topbar.css'), array('/convomail/js/convomail-topbar.js'));
