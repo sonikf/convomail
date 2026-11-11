@@ -12,7 +12,8 @@
  * \ingroup convomail
  * \brief   Address suggestions for the To / Cc / Bcc fields of compose. JSON.
  *
- * GET parameters: term (at least 2 characters), only=user for the "Copy to user(s)" / "Bcc to user(s)" fields
+ * GET parameters: term (at least 2 characters), only=user for the "Copy to user(s)" / "Bcc to user(s)" fields,
+ * which list every employee (up to 50) with an empty term, as they open on click
  * Returns up to 15 entries {value: "Name <email>", name, email, kind: contact|thirdparty|user|recent, detail}:
  * known records first, then addresses from the user's own email events.
  * Contacts and third parties follow core's visibility rules (sales representative restriction, private
@@ -60,13 +61,13 @@ if (!isModEnabled('convomail') || !$user->hasRight('convomail', 'message', 'send
 }
 
 $term = trim(GETPOST('term', 'alphanohtml'));
-if (dol_strlen($term) < 2) {
+$onlyusers = GETPOST('only', 'aZ09') === 'user';
+if (!$onlyusers && dol_strlen($term) < 2) {
 	print json_encode(array());
 	exit;
 }
 
-$max = 15;
-$onlyusers = GETPOST('only', 'aZ09') === 'user';
+$max = $onlyusers ? 50 : 15;
 $like = "'%".$db->escape($db->escapeforlike($term))."%'";
 $found = array();	// lowercase email => entry, first source wins
 

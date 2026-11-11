@@ -218,6 +218,7 @@
 .cm-thread-body img { max-width: 100%; height: auto; }
 
 /* Compose: address suggestions */
+.cm-ac-menu { max-height: 320px; overflow-y: auto; overflow-x: hidden; }	/* the user fields list up to 50 employees */
 .cm-ac-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .cm-ac-name { font-weight: 600; }
 .cm-ac-email { color: var(--colortextother, #666); }

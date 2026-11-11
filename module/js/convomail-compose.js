@@ -258,6 +258,8 @@
 		}
 		var url = input.getAttribute('data-cm-addresses');
 		var only = input.getAttribute('data-cm-only') || '';
+		// The user fields list every employee from the first click; the other fields wait for two letters
+		var minimum = only ? 0 : 2;
 		var kinds = {};
 		try { kinds = JSON.parse(input.getAttribute('data-cm-kinds') || '{}'); } catch (e) { kinds = {}; }
 		$(input).on('keydown', function (ev) {
@@ -266,16 +268,25 @@
 			if (ev.keyCode === $.ui.keyCode.TAB && inst && inst.menu.active) {
 				ev.preventDefault();
 			}
+		}).on('click', function () {
+			if (only && !$(this).autocomplete('widget').is(':visible')) {
+				$(this).autocomplete('search', this.value);
+			}
 		}).autocomplete({
-			minLength: 2,
+			minLength: minimum,
 			delay: 200,
 			source: function (request, response) {
-				var term = lastTerm(request.term).term;
-				if (term.length < 2) {
+				var split = lastTerm(request.term);
+				if (split.term.length < minimum) {
 					response([]);
 					return;
 				}
-				$.getJSON(url, only ? { term: term, only: only } : { term: term }).done(function (data) { response(Array.isArray(data) ? data : []); }).fail(function () { response([]); });
+				$.getJSON(url, only ? { term: split.term, only: only } : { term: split.term }).done(function (data) {
+					data = Array.isArray(data) ? data : [];
+					// Users already in the field are not offered again
+					var picked = split.head.toLowerCase();
+					response(only ? data.filter(function (d) { return picked.indexOf(d.email.toLowerCase()) === -1; }) : data);
+				}).fail(function () { response([]); });
 			},
 			focus: function () { return false; },
 			select: function (ev, ui) {
@@ -284,7 +295,9 @@
 				this.value = head + (head ? ' ' : '') + ui.item.value + ', ';
 				return false;
 			}
-		}).autocomplete('instance')._renderItem = function (ul, item) {
+		});
+		$(input).autocomplete('widget').addClass('cm-ac-menu');
+		$(input).autocomplete('instance')._renderItem = function (ul, item) {
 			// Built from text nodes: names and addresses come from the database
 			var row = $('<div class="cm-ac-item">');
 			row.append($('<span class="cm-ac-name">').text(item.name || item.email));
