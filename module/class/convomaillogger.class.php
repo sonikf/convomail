@@ -86,11 +86,11 @@ class ConvomailLogger
 			}
 		}
 		// Core only adds the owner when no one is assigned: list the sender first, then the other users
-		if (!empty($data['userids'])) {
-			$event->userassigned = array($user->id => array('id' => $user->id));
-			foreach ((array) $data['userids'] as $userid) {
-				if ((int) $userid > 0) {
-					$event->userassigned[(int) $userid] = array('id' => (int) $userid);
+		if (!empty($data['userids']) && is_array($data['userids'])) {
+			$event->userassigned = array((int) $user->id => array('id' => (int) $user->id, 'transparency' => (empty($event->transparency) ? 0 : 1)));
+			foreach ($data['userids'] as $userid) {
+				if (is_numeric($userid) && (int) $userid > 0) {
+					$event->userassigned[(int) $userid] = array('id' => (int) $userid, 'transparency' => 0);
 				}
 			}
 		}
