@@ -322,6 +322,7 @@ ConvomailAccountsLoadError = Your mail accounts could not be loaded (%s). An adm
 ConvomailNotInDolibarr = %s is not in Dolibarr.
 ConvomailCreateThirdParty = Create third party
 ConvomailAddContactTo = Add as contact of %s
+ConvomailAddContactPick = Add as contact…
 ConvomailThirdPartyCreated = %s was created
 ConvomailAddAsContact = Add as a contact
 ConvomailLogThisEmailOn = Log this email on %s

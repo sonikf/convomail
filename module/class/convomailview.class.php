@@ -603,18 +603,24 @@ class ConvomailView
 		}
 		$h .= '</div>';
 
-		// The person this message is with is not in Dolibarr: create the third party, or add them to the one using their domain
+		// The person this message is with is not in Dolibarr: create the third party, or add them as a contact
+		// (of the third party using their domain, else of one picked on core's form: a Gmail sender of a known company)
 		$person = self::correspondent($message, $myemails);
 		if ($person && !isset($matched[strtolower($person['email'])]) && isModEnabled('societe')) {
 			$actions = '';
 			$known = $matcher->thirdPartyForDomain((string) substr((string) strrchr($person['email'], '@'), 1), $user);
-			if ($known && $user->hasRight('societe', 'contact', 'creer')) {
+			$cancompany = $user->hasRight('societe', 'creer');
+			if ($user->hasRight('societe', 'contact', 'creer')) {
 				$n = ConvomailMatcher::splitName($person['name'], $person['email']);
-				$contacturl = DOL_URL_ROOT.'/contact/card.php?'.http_build_query(array('action' => 'create', 'socid' => $known['socid'],
-					'lastname' => $n['lastname'], 'firstname' => $n['firstname'], 'email' => $person['email'], 'backtopage' => $pageurl));
-				$actions .= ' <a class="cm-btn cm-primary" href="'.dol_escape_htmltag($contacturl).'">'.img_picto('', 'contact', 'class="pictofixedwidth"').$langs->trans('ConvomailAddContactTo', dol_escape_htmltag($known['name'])).'</a>';
+				$params = array('action' => 'create', 'lastname' => $n['lastname'], 'firstname' => $n['firstname'], 'email' => $person['email'], 'backtopage' => $pageurl);
+				if ($known) {
+					$params['socid'] = $known['socid'];
+				}
+				$contacturl = DOL_URL_ROOT.'/contact/card.php?'.http_build_query($params);
+				$label = $known ? $langs->trans('ConvomailAddContactTo', dol_escape_htmltag($known['name'])) : $langs->trans('ConvomailAddContactPick');
+				$actions .= ' <a class="cm-btn'.($known || !$cancompany ? ' cm-primary' : '').'" href="'.dol_escape_htmltag($contacturl).'">'.img_picto('', 'contact', 'class="pictofixedwidth"').$label.'</a>';
 			}
-			if ($user->hasRight('societe', 'creer')) {
+			if ($cancompany) {
 				$actions .= ' <a class="cm-btn'.($known ? '' : ' cm-primary').'" href="'.dol_escape_htmltag(self::newThirdPartyUrl($account, $folder, $uid, $person)).'">'.img_picto('', 'company', 'class="pictofixedwidth"').$langs->trans('ConvomailCreateThirdParty').'</a>';
 			}
 			if ($actions !== '') {
