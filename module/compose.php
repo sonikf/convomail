@@ -158,7 +158,7 @@ function convomail_back_url($socid, $projectid, $eventid = 0)
 $sendto = trim(GETPOST('sendto', 'alphawithlgt'), " ,;");
 $sendtocc = trim(GETPOST('sendtocc', 'alphawithlgt'), " ,;");
 $sendtobcc = trim(GETPOST('sendtobcc', 'alphawithlgt'), " ,;");
-// "Copy to user(s)" / "Bcc to user(s)": shown, like in core's mail form, when the email setup lets users be picked
+// "To user(s)" / "Copy to user(s)" / "Cached copy to user(s)": shown, like in core's mail form, when the email setup lets users be picked
 $withuserdest = getDolGlobalString('MAIN_MAIL_ENABLED_USER_DEST_SELECT') !== '';
 $sendtouser = $withuserdest ? trim(GETPOST('sendtouser', 'alphawithlgt'), " ,;") : '';
 $sendtoccuser = $withuserdest ? trim(GETPOST('sendtoccuser', 'alphawithlgt'), " ,;") : '';
