@@ -283,21 +283,29 @@
 				}
 				$.getJSON(url, only ? { term: split.term, only: only } : { term: split.term }).done(function (data) {
 					data = Array.isArray(data) ? data : [];
-					// Users already in the field are not offered again
-					var picked = split.head.toLowerCase();
-					response(only ? data.filter(function (d) { return picked.indexOf(d.email.toLowerCase()) === -1; }) : data);
+					// Users already in the field are not offered again: whole addresses, so anick@ doesn't hide nick@
+					var picked = split.head.toLowerCase().match(/[^\s<>,;"']+@[^\s<>,;"']+/g) || [];
+					response(only ? data.filter(function (d) { return d.kind === 'more' || picked.indexOf(String(d.email).toLowerCase()) === -1; }) : data);
 				}).fail(function () { response([]); });
 			},
 			focus: function () { return false; },
 			select: function (ev, ui) {
+				if (ui.item.kind === 'more') {
+					return false;
+				}
 				// Replace what was typed with the chosen address, ready for the next one
 				var head = lastTerm(this.value).head.replace(/\s*$/, '');
 				this.value = head + (head ? ' ' : '') + ui.item.value + ', ';
+				this.dispatchEvent(new Event('input', { bubbles: true }));
 				return false;
 			}
 		});
 		$(input).autocomplete('widget').addClass('cm-ac-menu');
 		$(input).autocomplete('instance')._renderItem = function (ul, item) {
+			if (item.kind === 'more') {
+				// Not an address: a hint that typing narrows the list
+				return $('<li class="ui-state-disabled cm-ac-more">').text(input.getAttribute('data-cm-more') || '').appendTo(ul);
+			}
 			// Built from text nodes: names and addresses come from the database
 			var row = $('<div class="cm-ac-item">');
 			row.append($('<span class="cm-ac-name">').text(item.name || item.email));
@@ -326,6 +334,15 @@
 				}
 			});
 			subject.form.querySelectorAll('[name="cancel"]').forEach(function (b) { b.formNoValidate = true; });
+			// To may stay empty when "To user(s)" has someone
+			var to = field('sendto');
+			var touser = field('sendtouser');
+			if (to && touser) {
+				var syncRequired = function () { to.required = touser.value.trim() === ''; };
+				touser.addEventListener('input', syncRequired);
+				touser.addEventListener('change', syncRequired);
+				syncRequired();
+			}
 		}
 
 		var chips = document.getElementById('cm-projectcontacts');

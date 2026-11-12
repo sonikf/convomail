@@ -357,33 +357,61 @@ function convomail_format_addresses(array $list, $withemail = false)
 }
 
 /**
- * Users picked in "Copy to user(s)" / "Bcc to user(s)": each address must be an active employee's, the same users
- * core's mail form offers (core/tpl/card_presend.tpl.php)
+ * Users picked in "To user(s)" / "Copy to user(s)" / "Cached copy to user(s)": each address must be an active
+ * employee's, the same users core's mail form offers (core/tpl/card_presend.tpl.php)
  *
  * @param  DoliDB          $db      Database
  * @param  string          $list    Addresses as typed or picked
  * @param  string[]        $unknown Addresses that are no such user's
  * @param  int[]           $ids     Ids of the users found
- * @return string                   "Name <email>" list, to add to Cc or Bcc
+ * @param  string          $exclude Addresses already in another field: their users are found but not listed again
+ * @return string                   "Name <email>" list, to add to To, Cc or Bcc
  */
-function convomail_user_addresses($db, $list, &$unknown, &$ids)
+function convomail_user_addresses($db, $list, &$unknown, &$ids, $exclude = '')
 {
 	$unknown = array();
 	$ids = array();
+	$emails = ConvomailMatcher::parseAddresses($list);
+	if (empty($emails)) {
+		return '';
+	}
+	$sql = "SELECT rowid, firstname, lastname, email FROM ".MAIN_DB_PREFIX."user";
+	$sql .= " WHERE entity IN (".getEntity('user').") AND statut = 1 AND employee = 1";
+	$sql .= " AND (fk_soc IS NULL OR fk_soc = 0) AND LOWER(email) IN (";
+	foreach ($emails as $i => $email) {
+		$sql .= ($i > 0 ? "," : "")."'".$db->escape($email)."'";
+	}
+	$sql .= ") ORDER BY rowid ASC";
+	$sql .= $db->plimit(count($emails) * 5);
+	$resql = $db->query($sql);
+	$users = array();	// lowercase email => first user with it
+	if ($resql === false || $resql === true) {
+		dol_syslog(__FUNCTION__.' '.$db->lasterror(), LOG_ERR);
+	} else {
+		while (is_array($row = $db->fetch_array($resql))) {
+			$email = strtolower(is_string($row['email']) ? $row['email'] : '');
+			if (!isset($users[$email])) {
+				$users[$email] = $row;
+			}
+		}
+	}
+	$excluded = array_flip(ConvomailMatcher::parseAddresses($exclude));
 	$out = array();
-	foreach (ConvomailMatcher::parseAddresses($list) as $email) {
-		$sql = "SELECT rowid, firstname, lastname, email FROM ".MAIN_DB_PREFIX."user";
-		$sql .= " WHERE entity IN (".getEntity('user').") AND statut = 1 AND employee = 1";
-		$sql .= " AND (fk_soc IS NULL OR fk_soc = 0) AND LOWER(email) = '".$db->escape($email)."'";
-		$resql = $db->query($sql);
-		$obj = $resql ? $db->fetch_object($resql) : null;
-		if (!$obj) {
+	foreach ($emails as $email) {
+		if (!isset($users[$email])) {
 			$unknown[] = $email;
 			continue;
 		}
-		$ids[] = (int) $obj->rowid;
-		$name = trim(str_replace(array('"', '<', '>', ','), '', dolGetFirstLastname($obj->firstname, $obj->lastname)));
-		$out[] = $name !== '' ? $name.' <'.$obj->email.'>' : $obj->email;
+		$row = $users[$email];
+		$ids[] = is_numeric($row['rowid']) ? (int) $row['rowid'] : 0;
+		if (isset($excluded[$email])) {
+			continue;
+		}
+		$firstname = is_string($row['firstname']) ? $row['firstname'] : '';
+		$lastname = is_string($row['lastname']) ? $row['lastname'] : '';
+		$address = is_string($row['email']) ? $row['email'] : $email;
+		$name = trim(str_replace(array('"', '<', '>', ','), '', dolGetFirstLastname($firstname, $lastname)));
+		$out[] = $name !== '' ? $name.' <'.$address.'>' : $address;
 	}
 	return implode(', ', $out);
 }
@@ -890,4 +918,3 @@ function convomail_filing_explanation($admin = false)
 	}
 	return $out.'</ul></details>';
 }
-

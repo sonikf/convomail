@@ -12,8 +12,9 @@
  * \ingroup convomail
  * \brief   Address suggestions for the To / Cc / Bcc fields of compose. JSON.
  *
- * GET parameters: term (at least 2 characters), only=user for the "Copy to user(s)" / "Bcc to user(s)" fields,
- * which list every employee (up to 50) with an empty term, as they open on click
+ * GET parameters: term (at least 2 characters), only=user for the "To user(s)" / "Copy to user(s)" /
+ * "Cached copy to user(s)" fields, which list every employee (up to 50) with an empty term, as they open on click;
+ * a last entry {kind: more} says when there are more employees than listed
  * Returns up to 15 entries {value: "Name <email>", name, email, kind: contact|thirdparty|user|recent, detail}:
  * known records first, then addresses from the user's own email events.
  * Contacts and third parties follow core's visibility rules (sales representative restriction, private
@@ -70,6 +71,7 @@ if (!$onlyusers && dol_strlen($term) < 2) {
 $max = $onlyusers ? 50 : 15;
 $like = "'%".$db->escape($db->escapeforlike($term))."%'";
 $found = array();	// lowercase email => entry, first source wins
+$more = false;		// only=user: more employees than listed
 
 /**
  * Add a suggestion unless the address is already listed
@@ -148,9 +150,13 @@ if (count($found) < $max && !$external && ($user->hasRight('user', 'user', 'lire
 	}
 	$sql .= " AND (u.email LIKE ".$like." OR u.lastname LIKE ".$like." OR u.firstname LIKE ".$like." OR CONCAT(u.firstname, ' ', u.lastname) LIKE ".$like.")";
 	$sql .= " ORDER BY u.lastname, u.firstname";
-	$sql .= $db->plimit($max);
+	$sql .= $db->plimit($onlyusers ? $max + 1 : $max);
 	$resql = $db->query($sql);
 	while ($resql && ($obj = $db->fetch_object($resql))) {
+		if ($onlyusers && count($found) >= $max) {
+			$more = true;
+			break;
+		}
 		convomail_add_suggestion($found, dolGetFirstLastname($obj->firstname, $obj->lastname), $obj->email, 'user');
 	}
 }
@@ -188,5 +194,9 @@ if (!$onlyusers && count($found) < $max && isModEnabled('agenda')) {
 	}
 }
 
-print json_encode(array_slice(array_values($found), 0, $max));
+$list = array_slice(array_values($found), 0, $max);
+if ($more) {
+	$list[] = array('value' => '', 'name' => '', 'email' => '', 'kind' => 'more', 'detail' => '');
+}
+print json_encode($list);
 $db->close();
