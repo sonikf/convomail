@@ -159,7 +159,7 @@ $sendto = trim(GETPOST('sendto', 'alphawithlgt'), " ,;");
 $sendtocc = trim(GETPOST('sendtocc', 'alphawithlgt'), " ,;");
 $sendtobcc = trim(GETPOST('sendtobcc', 'alphawithlgt'), " ,;");
 // "To user(s)" / "Copy to user(s)" / "Cached copy to user(s)": shown, like in core's mail form, when the email setup lets users be picked
-$withuserdest = getDolGlobalString('MAIN_MAIL_ENABLED_USER_DEST_SELECT') !== '';
+$withuserdest = (bool) getDolGlobalString('MAIN_MAIL_ENABLED_USER_DEST_SELECT');	// read as core does: "0" (No in Setup > Emails) is off
 $sendtouser = $withuserdest ? trim(GETPOST('sendtouser', 'alphawithlgt'), " ,;") : '';
 $sendtoccuser = $withuserdest ? trim(GETPOST('sendtoccuser', 'alphawithlgt'), " ,;") : '';
 $sendtobccuser = $withuserdest ? trim(GETPOST('sendtobccuser', 'alphawithlgt'), " ,;") : '';
