@@ -198,7 +198,7 @@ class ConvomailCharset
 
 		// UTF-8 labelled Latin-1 or not labelled: valid multibyte UTF-8 is UTF-8 (a cut last character ignored)
 		$trimmed = self::trimCutCharacter($text);
-		if (($latin || $charset === 'utf-8' || $charset === 'utf8') && mb_check_encoding($trimmed, 'UTF-8')) {
+		if (($latin || $charset === 'utf-8' || $charset === 'utf8') && utf8_valid($trimmed)) {
 			return $trimmed;
 		}
 
@@ -243,7 +243,7 @@ class ConvomailCharset
 	public static function redecode($text, $bodycharset = '')
 	{
 		$text = (string) $text;
-		if (!mb_check_encoding($text, 'UTF-8')) {
+		if (!utf8_valid($text)) {
 			return self::toUtf8($text, '', $bodycharset);
 		}
 		if (!preg_match('/[^\x00-\x7F]/', $text)) {
@@ -269,7 +269,7 @@ class ConvomailCharset
 		$utf8 = $other = 0;
 		foreach ($words as $word) {
 			if (preg_match('/[\x80-\xFF]/', $word)) {
-				mb_check_encoding($word, 'UTF-8') ? $utf8++ : $other++;
+				utf8_valid($word) ? $utf8++ : $other++;
 			}
 		}
 		if ($utf8 > 0 && $other > 0) {
@@ -396,7 +396,7 @@ class ConvomailCharset
 	{
 		$text = mb_scrub($text, 'UTF-8');
 		$bad = self::garbage($text);
-		$chars = mb_str_split((string) preg_replace('/[\x00-\x7F\s\p{P}\p{S}\p{N}\p{M}]+/u', '', mb_strtolower($text, 'UTF-8')), 1, 'UTF-8');
+		$chars = mb_str_split((string) preg_replace('/[\x00-\x7F\s\p{P}\p{S}\p{N}\p{M}]+/u', '', dol_strtolower($text)), 1, 'UTF-8');
 		if (empty($chars)) {
 			return -3.0 * $bad;
 		}
