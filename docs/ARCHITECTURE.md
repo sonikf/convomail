@@ -222,6 +222,8 @@ Keys: unique `(fk_account, msgid)`, unique `track_key`, `fk_actioncomm`.
 
    Signature (`$user->signature`) when `CONVOMAIL_ADD_SIGNATURE`. Templates via `ajax/template.php`, project chips via `ajax/projectcontacts.php`, address suggestions in To / Cc / Bcc via `ajax/addresses.php` (jQuery UI autocomplete, multi-address).
 
+   **To user(s) / Copy to user(s) / Cached copy to user(s)** (`sendtouser`, `sendtoccuser`, `sendtobccuser`) show when `MAIN_MAIL_ENABLED_USER_DEST_SELECT` is on (Setup > Emails, "Suggest emails of employees"; `"0"` is off, as core reads it). They suggest with `ajax/addresses.php?only=user` (active employees, up to 50, listed on click). On send, `convomail_user_addresses()` refuses any address that isn't an active employee's and adds the users to To, Cc or Bcc, skipping addresses already in an earlier field. With `CONVOMAIL_USERS_AS_ATTENDEES`, the To and Cc users (never Bcc) are passed as `userids` to `ConvomailLogger`, which assigns them to the event after the sender.
+
    The editor gets extra allowed content (`DolEditor::Create()` third argument) so CKEditor's filter keeps the reply quote's `<blockquote>` and border, and plain-text quotes come as `<br>` lines (`cleanBody(…, true)`).
 
    **AI writing tools** (core AI module enabled, rich editor): a panel posting to core's `ai/ajax/generate_content.php` (JSON `format=html`, `function` = `textgenerationemail` | `textrephraser` | `textsummarize` | `texttranslation`; core's prompts, service and model). `js/convomail-compose.js` `splitBody()` cuts the editor content at the first top-level block that is the signature (`-- `), a blockquote, or the quote intro (`data-intro`); only the part above is sent and replaced. Write adds that draft, and for replies/forwards the quoted message as text (`data-quote`, 8,000 characters at most). `cleanAiHtml()` drops code fences, a whole-body `<section>`, scripts, styles, event handlers and `style` attributes, so core's injection filter accepts the send. Core answers 200 with an error text when the provider is unreachable (UPSTREAM item 15): answers starting with core's error texts are shown as errors. **Undo** restores the editor content from before the change (CKEditor's own undo can't step over `setData()`).
@@ -416,7 +418,7 @@ The response is JSON `{ok, removed, message, events}`; the JS updates rows and t
 | `ajax/action.php` | POST + token | `accountid, folder, uids[], action, dest, projectid, socid, contactids` | `account->read`; usable account | JSON |
 | `ajax/template.php` | GET | `id, socid, contactid, projectid` | `message->send`; template public or own | JSON `{subject, body}` |
 | `ajax/projectcontacts.php` | GET | `id` | `message->send` + project read + private-project check | JSON list |
-| `ajax/addresses.php` | GET | `term` (2+ chars) | `message->send`; contacts need `societe->contact->lire`, third parties `societe->lire`, both limited like core lists (`societe_commerciaux` without `client->voir`, private contacts, external users to their company); users need `user->user->lire`; recent = the user's own email events, minus their own addresses | JSON list, up to 15 |
+| `ajax/addresses.php` | GET | `term` (2+ chars), or `only=user` (employees, empty term allowed) | `message->send`; contacts need `societe->contact->lire`, third parties `societe->lire`, both limited like core lists (`societe_commerciaux` without `client->voir`, private contacts, external users to their company); users need `user->user->lire` (or `MAIN_MAIL_ENABLED_USER_DEST_SELECT` with `only=user`, as core's mail form); recent = the user's own email events, minus their own addresses | JSON list, up to 15 (`only=user`: 50, then a `{kind: more}` entry) |
 | `ajax/debug.php` | GET | `mode` | admin + `CONVOMAIL_DEBUG_MODE` | Text |
 | `ajax/combined.php` | POST + token | `action=markread, maxuid[<account>]` | `account->read`; internal user; the user's Combined Inbox mailboxes | JSON `{ok, marked, errors, message}` |
 | `public/open.php` | GET | `k, entity` | none (public) | 1×1 GIF |
@@ -452,6 +454,7 @@ The AJAX files define `NOTOKENRENEWAL`, so the page's CSRF token stays valid for
   | `CONVOMAIL_UNREAD_INDICATOR` | 1 (created on activation, and on upgrade to 1.0.90) | Unread emails indicator in the top bar (6.2c) |
   | `CONVOMAIL_POLL_INTERVAL` | 60 (unset) | Seconds between new-mail checks of the mailbox page (0, 30, 60, 120, 300; 0 = off) |
   | `CONVOMAIL_ADD_SIGNATURE` | 1 (created on activation) | Insert signature in compose |
+  | `CONVOMAIL_USERS_AS_ATTENDEES` | 0 (unset) | Users in To user(s) / Copy to user(s) are assigned to the email's event (6.1) |
   | `CONVOMAIL_READ_RECEIPT_DEFAULT` | 0 | Read receipt box ticked by default |
   | `CONVOMAIL_OPEN_TRACKING` | 0 | Open tracking available |
   | `CONVOMAIL_OPEN_IGNORE_IPS` | empty | *Your networks*: addresses and ranges whose image loads are the team's (6.6) |

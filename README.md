@@ -2,7 +2,7 @@
 
 Convomail lets each Dolibarr user send email from inside Dolibarr through their own mailbox. Every message is logged on the agenda of the customer, contact and project it belongs to. Users stop leaving Dolibarr to write email in another client, and the conversation history stays where the sales work happens.
 
-**Status:** version 1.2.2. Send and log, a three-pane mailbox with folders, conversations and Spam / Not spam, a Combined Inbox of several mailboxes, unread emails from contacts in the top bar, email on projects, turning emails into Dolibarr records (file attachments, link to an existing document, create a proposal, order, invoice, supplier invoice or quote, ticket or project; a supplier invoice can be filled from its e-invoice data, or read by the AI when it has none), new mail that shows up by itself, read receipts and open tracking, AI writing tools, rich-text compose with signature and templates, sign-in with Google or Microsoft 365 (OAuth), shared mailboxes, and a phone layout. Tested on Dolibarr 23.0 and 20.0 with PHP 8.2 against GreenMail and Dovecot test servers, including OAuth sign-in against a local token check, and by the owner on a Dolibarr 24 test instance. Not yet tested against real Gmail or Microsoft 365 servers.
+**Status:** version 1.3.0. Send and log, a three-pane mailbox with folders, conversations and Spam / Not spam, a Combined Inbox of several mailboxes, unread emails from contacts in the top bar, email on projects, turning emails into Dolibarr records (file attachments, link to an existing document, create a proposal, order, invoice, supplier invoice or quote, ticket or project; a supplier invoice can be filled from its e-invoice data, or read by the AI when it has none), new mail that shows up by itself, read receipts and open tracking, AI writing tools, rich-text compose with signature, templates and employee recipient fields, sign-in with Google or Microsoft 365 (OAuth), shared mailboxes, and a phone layout. Tested on Dolibarr 23.0 and 20.0 with PHP 8.2 against GreenMail and Dovecot test servers, including OAuth sign-in against a local token check, and by the owner on a Dolibarr 24 test instance. Not yet tested against real Gmail or Microsoft 365 servers.
 
 ![Convomail mailbox](docs/mailbox.jpg)
 
@@ -422,6 +422,8 @@ Mail accounts, logged messages and settings are kept when you disable, re-enable
 
 Passwords of mail accounts are encrypted with the instance key in Dolibarr's `conf.php` (`$dolibarr_main_instance_unique_id`). If Dolibarr itself is reinstalled with a new `conf.php`, keep that value, or users must re-enter their mail passwords (OAuth accounts must reconnect).
 
+**From 1.2.2 to 1.3.0:** deploy the new zip. No database change. Compose shows **To user(s)**, **Copy to user(s)** and **Cached copy to user(s)** when *Suggest emails of employees* is on in Setup > Emails (as core's own mail form does). New setting **Assign picked users to the email's event**, off by default. People not in Dolibarr get **Add as contact…** next to **Create third party**.
+
 **From 1.2.1 to 1.2.2:** deploy the new zip. No database change, no new setting. On the compose page, **Send** with an empty To or Subject now stops on the page instead of going to the server, so attached files are kept. Accounts with **Server saves sent mail itself** ticked whose SMTP server is not Gmail or Microsoft 365 now get a warning after each send, since Convomail saves no Sent copy for them: untick the box on those accounts if their sent emails are missing from the Sent folder.
 
 **From 1.2.0 to 1.2.1:** deploy the new zip. No database change, no new setting. The buttons of the open message and the shortcuts now act on the open message and the ticked rows together, so with rows ticked they change more than one email.
@@ -485,6 +487,7 @@ Convomail is built as a module first, with the aim of proposing webmail for Doli
 | Reading supplier invoices | Fill the supplier invoice panel from e-invoice data (Factur-X, UBL, CII), then from the PDF text through the AI module | **Done (0.16.0 – 0.18.0)** |
 | Mailbox views, better open tracking | Unread emails from contacts in the top bar with Mark all as read, the Combined Inbox, open tracking that leaves out the team's own views and scanners and says who loaded the image | **Done (1.1.0)** |
 | Spam | Spam and Not spam buttons (`!`) that report to the mail server, lists in arrival order | **Done (1.2.0)** |
+| Employees and contacts | To / Copy to / Cached copy to user(s) in compose, optionally assigned to the email's event; Add as contact… for anyone not in Dolibarr | **Done (1.3.0)** |
 | 4. Sales features | Awaiting-reply columns, follow-up nudges, last message on opportunity cards, response-time reports | Planned |
 
 [UPSTREAM.md](UPSTREAM.md) lists the small core changes the module works around, which come before proposing it upstream.

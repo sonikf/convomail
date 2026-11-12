@@ -28,7 +28,7 @@ class InterfaceConvomailTrigger extends DolibarrTriggers
 		$this->name = preg_replace('/^Interface/i', '', get_class($this));
 		$this->family = 'crm';
 		$this->description = 'Triggers for the convomail module';
-		$this->version = '1.2.2';
+		$this->version = '1.3.0';
 		$this->picto = 'fa-envelope';
 	}
 
