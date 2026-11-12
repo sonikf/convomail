@@ -618,10 +618,10 @@ class ConvomailView
 				}
 				$contacturl = DOL_URL_ROOT.'/contact/card.php?'.http_build_query($params);
 				$label = $known ? $langs->trans('ConvomailAddContactTo', dol_escape_htmltag($known['name'])) : $langs->trans('ConvomailAddContactPick');
-				$actions .= ' <a class="cm-btn'.($known || !$cancompany ? ' cm-primary' : '').'" href="'.dol_escape_htmltag($contacturl).'">'.img_picto('', 'contact', 'class="pictofixedwidth"').$label.'</a>';
+				$actions .= ' <a class="cm-btn cm-primary" href="'.dol_escape_htmltag($contacturl).'">'.img_picto('', 'contact', 'class="pictofixedwidth"').$label.'</a>';
 			}
 			if ($cancompany) {
-				$actions .= ' <a class="cm-btn'.($known ? '' : ' cm-primary').'" href="'.dol_escape_htmltag(self::newThirdPartyUrl($account, $folder, $uid, $person)).'">'.img_picto('', 'company', 'class="pictofixedwidth"').$langs->trans('ConvomailCreateThirdParty').'</a>';
+				$actions .= ' <a class="cm-btn cm-primary" href="'.dol_escape_htmltag(self::newThirdPartyUrl($account, $folder, $uid, $person)).'">'.img_picto('', 'company', 'class="pictofixedwidth"').$langs->trans('ConvomailCreateThirdParty').'</a>';
 			}
 			if ($actions !== '') {
 				$h .= '<div class="cm-unknownline">'.img_picto('', 'fa-user-plus', 'class="pictofixedwidth opacitymedium"');
