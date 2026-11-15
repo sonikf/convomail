@@ -33,6 +33,10 @@ if (!$res) {
 	die("Include of main fails");
 }
 
+/**
+ * @var HookManager $hookmanager
+ */
+
 require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
 dol_include_once('/convomail/class/convomailview.class.php');
 dol_include_once('/convomail/class/convomailcombined.class.php');
@@ -51,6 +55,7 @@ $refresh    = GETPOSTINT('refresh');
 $openuid    = GETPOSTINT('uid');
 $showimages = GETPOSTINT('showimages');
 $limit      = GETPOSTINT('limit');
+$action     = GETPOST('action', 'aZ09');
 
 if (!isModEnabled('convomail') || !$user->hasRight('convomail', 'account', 'read')) {
 	accessforbidden();
@@ -79,7 +84,7 @@ if (getDolUserString('CONVOMAIL_LAST_VIEW') !== '') {
 }
 
 // "Show conversation" switch of the folder column, remembered for the user (only "off" is stored)
-if (GETPOST('action', 'aZ09') === 'setconversation' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($action === 'setconversation' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	dol_set_user_param($db, $conf, $user, array('CONVOMAIL_HIDE_CONVERSATION' => GETPOSTINT('showconversation') ? '' : '1'));
 	header('Location: '.$_SERVER['PHP_SELF'].'?accountid='.$accountid.'&folder='.urlencode($folder)
 		.($search !== '' ? '&search='.urlencode($search).($searchbody ? '&searchbody=1' : '') : '').($page > 0 ? '&page='.$page : '').($openuid > 0 ? '&uid='.$openuid : ''));
@@ -89,6 +94,16 @@ if (GETPOST('action', 'aZ09') === 'setconversation' && $_SERVER['REQUEST_METHOD'
 $account = convomail_get_usable_account($db, $user, $accountid);
 if ($accountid > 0 && !$account) {
 	accessforbidden();
+}
+
+// Other modules can act on the mailbox page (context convomailmailbox; the object is the open account, or none)
+// (the only action of the page, setconversation, is handled above: it changes a display preference only)
+$hookmanager->initHooks(array('convomailmailbox'));
+$object = $account ?: null;
+$parameters = array('accountid' => $accountid, 'folder' => $folder, 'search' => $search);
+$reshook = $hookmanager->executeHooks('doActions', $parameters, $object, $action);
+if ($reshook < 0) {
+	setEventMessages($hookmanager->error, $hookmanager->errors, 'errors');
 }
 
 llxHeader(convomail_assets(array('/convomail/css/convomail.css'), array('/convomail/js/convomail.js')), $langs->trans('Mailbox'), '', '', 0, 0, '', '', '', 'mod-convomail page-mailbox');
