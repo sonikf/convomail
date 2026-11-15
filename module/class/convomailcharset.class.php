@@ -233,6 +233,28 @@ class ConvomailCharset
 	}
 
 	/**
+	 * Charset that toUtf8() detects for 8-bit text labelled with no charset or a Latin-1 one: a message body's,
+	 * preferred for its headers, which have too few letters to detect on their own
+	 *
+	 * @param  string $text    Bytes (the start of the text is enough)
+	 * @param  string $charset Declared charset, '' when none
+	 * @return string          Lower case charset, '' for ASCII, UTF-8 or text labelled with another charset
+	 */
+	public static function undeclared($text, $charset = '')
+	{
+		$text = (string) $text;
+		$charset = dol_strtolower(trim((string) $charset, " \t\"'"));
+		if (in_array($charset, array('', 'us-ascii', 'ascii'), true) && preg_match('/<meta[^>]+charset=["\']?([\w.:-]+)/i', $text, $m)) {
+			$charset = dol_strtolower($m[1]);
+		}
+		if (!in_array($charset, array('', 'iso-8859-1', 'iso8859-1', 'latin1', 'windows-1252', 'cp1252', 'us-ascii', 'ascii'), true)
+			|| !preg_match('/[\x80-\xFF]/', $text) || utf8_valid(self::trimCutCharacter($text))) {
+			return '';
+		}
+		return self::detect($text, in_array($charset, array('', 'us-ascii', 'ascii'), true) ? '' : 'windows-1252');
+	}
+
+	/**
 	 * Text a library already decoded as windows-1252 or ISO-8859-1 (its fallback for charsets mbstring lacks, raw
 	 * 8-bit bytes and Latin-1 labels), decoded again from its bytes
 	 *
