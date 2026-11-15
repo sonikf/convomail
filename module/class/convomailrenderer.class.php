@@ -353,7 +353,7 @@ class ConvomailRenderer
 
 		$html = self::stripTrackers((string) $html);
 		ConvomailHordeMailboxClient::loadLibrary();	// Composer autoloader (HTMLPurifier is in vendor/)
-		if (!class_exists('HTMLPurifier')) {
+		if (!ConvomailHordeMailboxClient::checkLibrary('HTMLPurifier', dol_buildpath('/convomail/vendor', 0))) {
 			// Never show unpurified HTML
 			return '<div style="white-space:pre-wrap">'.htmlspecialchars(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8').'</div>';
 		}
