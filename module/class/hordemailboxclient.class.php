@@ -71,6 +71,9 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 		$this->timeout = max(5, (int) $seconds);
 	}
 
+	/** @var array<string,bool> Library classes whose origin was checked (see checkLibrary()) */
+	private static $librarychecked = array();
+
 	/**
 	 * Load the vendored Composer autoloader once
 	 *
@@ -78,14 +81,36 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 	 */
 	public static function loadLibrary()
 	{
-		if (class_exists('Horde_Imap_Client_Socket', true)) {
-			return true;
-		}
+		// Always our own autoloader, before any class is looked up: Composer puts it first, so another module's copy
+		// of Horde or HTMLPurifier is not mixed with ours
 		$autoload = dol_buildpath('/convomail/vendor/autoload.php', 0);
 		if (is_readable($autoload)) {
 			require_once $autoload;
 		}
-		return class_exists('Horde_Imap_Client_Socket', true);
+		return self::checkLibrary('Horde_Imap_Client_Socket', dirname($autoload));
+	}
+
+	/**
+	 * Whether a library class is loaded, logging once when it came from another copy than ours (loaded earlier)
+	 *
+	 * @param  string $class  Class name
+	 * @param  string $vendor Our vendor directory
+	 * @return bool
+	 */
+	public static function checkLibrary($class, $vendor)
+	{
+		if (!class_exists($class, true)) {
+			return false;
+		}
+		if (!isset(self::$librarychecked[$class])) {
+			self::$librarychecked[$class] = true;
+			$file = (string) (new ReflectionClass($class))->getFileName();
+			$dir = realpath($vendor);
+			if ($dir !== false && strpos((string) realpath($file), $dir.DIRECTORY_SEPARATOR) !== 0) {
+				dol_syslog(__METHOD__.' '.$class.' was loaded from '.$file.', not from Convomail\'s vendor directory: versions may differ', LOG_WARNING);
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -1031,6 +1056,63 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 	}
 
 	/**
+	 * Raw header block of a fetch result (the headers asked for, or the whole block)
+	 *
+	 * @param  Horde_Imap_Client_Data_Fetch $data Fetch result
+	 * @return string
+	 */
+	private static function rawHeaders($data)
+	{
+		$refs = $data->getHeaders('refs');
+		$headertext = (is_string($refs) && $refs !== '') ? $refs : $data->getHeaderText('0');
+		return is_string($headertext) ? $headertext : '';
+	}
+
+	/**
+	 * Subject decoded again in the charset detected from the body, when the body declares none (or Latin-1) and the
+	 * subject is raw 8-bit or a Latin-1 encoded word: a short subject has too few letters to detect on its own
+	 *
+	 * @param  mixed       $data        Fetch result with the headers
+	 * @param  string      $bodycharset Charset detected from the body, '' for none
+	 * @return string|null              Subject, null to keep the one decoded so far
+	 */
+	private static function subjectInBodyCharset($data, $bodycharset)
+	{
+		if (!$data instanceof Horde_Imap_Client_Data_Fetch || $bodycharset === '' || in_array($bodycharset, array('windows-1252', 'iso-8859-1'), true)) {
+			return null;
+		}
+		$raw = self::rawHeader(self::rawHeaders($data), 'Subject');
+		if ($raw === null || !preg_match('/[\x80-\xFF]|=\?(?:iso-?8859-1|latin1|windows-1252|cp1252|us-ascii)\?/i', $raw)) {
+			return null;
+		}
+		return ConvomailCharset::decodeHeader($raw, $bodycharset);
+	}
+
+	/**
+	 * Subject of one message decoded in its body's charset (see subjectInBodyCharset()), reading the start of the body
+	 * only when the subject may need it
+	 *
+	 * @param  string      $folder Folder
+	 * @param  int         $uid    UID
+	 * @param  mixed       $data   Fetch result with the headers and the structure
+	 * @return string|null         Subject, null to keep the one decoded so far
+	 */
+	private function subjectFromBodyStart($folder, $uid, $data)
+	{
+		if (!$data instanceof Horde_Imap_Client_Data_Fetch) {
+			return null;
+		}
+		$raw = self::rawHeader(self::rawHeaders($data), 'Subject');
+		$found = self::firstTextPart($data->getStructure());
+		if ($raw === null || !$found || !ConvomailCharset::headerNeedsDecoding($raw)) {
+			return null;
+		}
+		$bodycharsets = array();
+		$this->snippets($folder, array($uid => $found), $bodycharsets);
+		return empty($bodycharsets[$uid]) ? null : self::subjectInBodyCharset($data, $bodycharsets[$uid]);
+	}
+
+	/**
 	 * Raw value of a header in a header block
 	 *
 	 * @param  string      $rawheaders Header block
@@ -1088,8 +1170,7 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 		}
 
 		// Horde decodes headers with mbstring only: redo those in other charsets (windows-1253...) or raw 8-bit
-		$headertext = ($refstext !== '') ? $refstext : $data->getHeaderText('0');
-		$rawheaders = is_string($headertext) ? $headertext : '';
+		$rawheaders = self::rawHeaders($data);
 		$bodycharset = self::bodyCharset($structure);
 		$subject = (string) $envelope->subject;
 		$raw = self::rawHeader($rawheaders, 'Subject');
@@ -1280,19 +1361,28 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 		$fetchquery->headers('refs', self::RAW_HEADERS, array('peek' => true));
 		$fetched = $imap->fetch($folder, $fetchquery, array('ids' => new Horde_Imap_Client_Ids($uids)));
 		$textparts = array();	// uid => array(part id, Horde_Mime_Part)
+		$datas = array();	// index in $messages => fetch result
 		foreach ($uids as $uid) {
 			$data = $fetched[$uid];
 			if ($data) {
 				$messages[] = self::summary($uid, $data);
+				$datas[count($messages) - 1] = array((int) $uid, $data);
 				$found = self::firstTextPart($data->getStructure());
 				if ($found) {
 					$textparts[$uid] = $found;
 				}
 			}
 		}
-		$snippets = $this->snippets($folder, $textparts);
+		$bodycharsets = array();
+		$snippets = $this->snippets($folder, $textparts, $bodycharsets);
 		foreach ($messages as $i => $m) {
 			$messages[$i]['snippet'] = $snippets[$m['uid']] ?? '';
+		}
+		foreach ($datas as $i => $d) {
+			$bodysubject = empty($bodycharsets[$d[0]]) ? null : self::subjectInBodyCharset($d[1], $bodycharsets[$d[0]]);
+			if ($bodysubject !== null) {
+				$messages[$i]['subject'] = $bodysubject;
+			}
 		}
 		return $messages;
 	}
@@ -1371,6 +1461,12 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 			}
 
 			$message = self::summary($uid, $data);
+
+			// An 8-bit subject with an unlabelled 8-bit body: the start of the body says which charset both are in
+			$bodysubject = $this->subjectFromBodyStart($folder, (int) $uid, $data);
+			if ($bodysubject !== null) {
+				$message['subject'] = $bodysubject;
+			}
 
 			// References from the raw header block (unfolded)
 			$headertext = (string) $data->getHeaderText(0);
@@ -1508,12 +1604,15 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 	/**
 	 * Short previews of a page of messages: one partial fetch per distinct part id
 	 *
-	 * @param  string                                   $folder    Folder
+	 * @param  string                                   $folder       Folder
 	 * @param  array<int,array{0:string,1:Horde_Mime_Part}> $textparts uid => first text part
+	 * @param  array<int,string>                        $bodycharsets Set to uid => charset detected from an 8-bit
+	 *                                                                body labelled with none or Latin-1
 	 * @return array<int,string>                        uid => snippet
 	 */
-	private function snippets($folder, array $textparts)
+	private function snippets($folder, array $textparts, &$bodycharsets = array())
 	{
+		$bodycharsets = array();
 		$byid = array();
 		foreach ($textparts as $uid => $found) {
 			$byid[$found[0]][] = $uid;
@@ -1556,7 +1655,12 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 					}
 					$part->setContents($raw);
 					$text = (string) $part->getContents();
-					$text = ConvomailCharset::toUtf8($text, (string) $part->getCharset());
+					$charset = (string) $part->getCharset();
+					$undeclared = ConvomailCharset::undeclared($text, $charset);
+					if ($undeclared !== '') {
+						$bodycharsets[$uid] = $undeclared;
+					}
+					$text = ConvomailCharset::toUtf8($text, $charset);
 					if ($part->getSubType() === 'html') {
 						$text = preg_replace('#<(style|script|head)[^>]*>.*?</\1>#is', ' ', $text);
 						$text = html_entity_decode(strip_tags(preg_replace('#<br\s*/?>|</p>#i', "\n", $text)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
