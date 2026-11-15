@@ -491,13 +491,37 @@ class ConvomailAccount extends CommonObject
 	 */
 	public function canRead(User $u)
 	{
-		if (!$u->hasRight('convomail', 'account', 'read') && !$u->hasRight('convomail', 'account', 'admin')) {
-			return false;
+		return $this->readAccess($u) !== '';
+	}
+
+	/**
+	 * Why this user may read this account
+	 *
+	 * @param  User   $u User
+	 * @return string    'own', 'shared' (granted), 'all' (reads all users' mailboxes), 'hierarchy' (a subordinate's), '' if not allowed
+	 */
+	public function readAccess(User $u)
+	{
+		// Until the read right is split from the admin one (modConvomail::migrateReadRights()), admin still reads all
+		$readall = $u->hasRight('convomail', 'account', 'readall') || (!getDolGlobalInt('CONVOMAIL_RIGHTS_SPLIT') && $u->hasRight('convomail', 'account', 'admin'));
+		$readhierarchy = (bool) $u->hasRight('convomail', 'account', 'readhierarchy');
+		if (!$u->hasRight('convomail', 'account', 'read') && !$readall && !$readhierarchy) {
+			return '';
 		}
-		if ((int) $this->fk_user === (int) $u->id || $u->hasRight('convomail', 'account', 'admin')) {
-			return true;
+		$owner = (int) $this->fk_user;
+		if (!$this->isShared() && $owner === (int) $u->id) {
+			return 'own';
 		}
-		return $this->isShared() && $this->accessOf($u)['read'];
+		if ($this->isShared() && $this->accessOf($u)['read']) {
+			return 'shared';
+		}
+		if ($readall) {
+			return 'all';
+		}
+		if ($readhierarchy && !$this->isShared() && in_array($owner, array_map('intval', $u->getAllChildIds()), true)) {
+			return 'hierarchy';
+		}
+		return '';
 	}
 
 	/**
