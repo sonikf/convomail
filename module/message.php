@@ -31,6 +31,7 @@ if (!$res) {
 
 /**
  * @var Translate $langs
+ * @var HookManager $hookmanager
  */
 
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
@@ -61,6 +62,17 @@ $listurl = dol_buildpath('/convomail/mailbox.php', 1).'?accountid='.((int) $acco
 $selfurl = $_SERVER['PHP_SELF'].'?accountid='.((int) $account->id).'&folder='.urlencode($folder).'&uid='.((int) $uid);
 
 $client = new ConvomailHordeMailboxClient($account);
+
+// Other modules can act on the message page (context convomailmessage; the object is the account); a hook that
+// handled the action (> 0) replaces ours
+$hookmanager->initHooks(array('convomailmessage'));
+$parameters = array('folder' => $folder, 'uid' => $uid);
+$reshook = $hookmanager->executeHooks('doActions', $parameters, $account, $action);
+if ($reshook < 0) {
+	setEventMessages($hookmanager->error, $hookmanager->errors, 'errors');
+} elseif ($reshook > 0) {
+	$action = '';
+}
 
 
 /*

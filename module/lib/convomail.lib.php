@@ -121,7 +121,7 @@ function convomail_test_smtp(ConvomailAccount $account)
 }
 
 /**
- * Load an enabled account the current user may use (own account, or any with the admin right)
+ * Load an enabled account the current user may use (own, granted, or another user's with a read right)
  *
  * @param  DoliDB $db        Database
  * @param  User   $user      Current user
@@ -135,6 +135,7 @@ function convomail_get_usable_account($db, $user, $accountid = 0)
 	$account = new ConvomailAccount($db);
 	if ($accountid > 0) {
 		if ($account->fetch($accountid) > 0 && $account->canBeUsedBy($user) && (int) $account->status === ConvomailAccount::STATUS_ENABLED) {
+			convomail_log_read($db, $user, $account);
 			return $account;
 		}
 		return null;
@@ -947,4 +948,36 @@ function convomail_virus_free($path, $name)
 	dol_delete_file($path, 1, 1, 1, null, false, 0);
 	setEventMessages($langs->trans('ErrorFileIsInfectedWithAVirus').': '.$name, $virus, 'errors');
 	return false;
+}
+
+/**
+ * Record in Dolibarr's security events when a user reads another user's mailbox through a read right, once per session
+ *
+ * @param  DoliDB           $db      Database
+ * @param  User             $user    Reader
+ * @param  ConvomailAccount $account Mailbox read
+ * @return void
+ */
+function convomail_log_read($db, $user, $account)
+{
+	/** @var Translate $langs */
+	global $langs;
+
+	$why = $account->readAccess($user);
+	$logged = (isset($_SESSION['convomail_read_logged']) && is_array($_SESSION['convomail_read_logged'])) ? $_SESSION['convomail_read_logged'] : array();
+	if (!in_array($why, array('all', 'hierarchy'), true) || !empty($logged[(int) $account->id])) {
+		return;
+	}
+	require_once DOL_DOCUMENT_ROOT.'/core/class/events.class.php';
+	$langs->load('convomail@convomail');
+	$event = new Events($db);
+	$event->type = 'CONVOMAIL_READ_OTHER';
+	$event->dateevent = dol_now();
+	$event->description = $langs->transnoentitiesnoconv($why === 'all' ? 'ConvomailReadLogAll' : 'ConvomailReadLogHierarchy', (is_string($account->email) ? $account->email : ''), (string) $account->id);
+	if ($event->create($user) > 0) {
+		$logged[(int) $account->id] = 1;
+		$_SESSION['convomail_read_logged'] = $logged;
+	} else {
+		dol_syslog(__FUNCTION__.' '.$event->error, LOG_WARNING);
+	}
 }

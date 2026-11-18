@@ -37,6 +37,10 @@ if (!$res) {
 	die("Include of main fails");
 }
 
+/**
+ * @var HookManager $hookmanager
+ */
+
 require_once DOL_DOCUMENT_ROOT.'/core/class/doleditor.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
@@ -328,6 +332,17 @@ if ($action == '') {
 /*
  * Actions
  */
+
+// Other modules can act on the compose page (context convomailcompose); a hook that handled the action (> 0) replaces ours
+$hookmanager->initHooks(array('convomailcompose'));
+$object = null;
+$parameters = array('accountid' => $accountid, 'socid' => $socid, 'contactid' => $contactid, 'projectid' => $projectid, 'origin' => $origin, 'originid' => $originid, 'replyto' => $replyto);
+$reshook = $hookmanager->executeHooks('doActions', $parameters, $object, $action);
+if ($reshook < 0) {
+	setEventMessages($hookmanager->error, $hookmanager->errors, 'errors');
+} elseif ($reshook > 0) {
+	$action = 'retry';
+}
 
 if ($cancel) {
 	if ($srcmessage) {

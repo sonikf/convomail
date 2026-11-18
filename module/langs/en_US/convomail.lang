@@ -8,6 +8,10 @@ Module194282Desc = Send email from Dolibarr through each user's own mailbox and 
 Permission19428201 = Use and manage own mail accounts
 Permission19428202 = Send email from Dolibarr
 Permission19428203 = Manage the mail accounts of all users
+Permission19428204 = Read the mailboxes of all users
+Permission19428205 = Read the mailboxes of subordinates
+ConvomailReadLogAll = Read the mailbox %s (account %s) of another user, with the right to read all mailboxes
+ConvomailReadLogHierarchy = Read the mailbox %s (account %s) of a subordinate
 
 # Menus and titles
 MailAccounts = Mail accounts

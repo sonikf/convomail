@@ -146,14 +146,13 @@ class ConvomailPdfEmbedded
 	 */
 	public static function loadLibrary()
 	{
-		if (class_exists('\Smalot\PdfParser\Parser', true)) {
-			return true;
-		}
+		// Always our own autoloader first (see ConvomailHordeMailboxClient::loadLibrary())
 		$autoload = __DIR__.'/../vendor/autoload.php';
 		if (is_readable($autoload)) {
 			require_once $autoload;
 		}
-		return class_exists('\Smalot\PdfParser\Parser', true);
+		dol_include_once('/convomail/class/hordemailboxclient.class.php');
+		return ConvomailHordeMailboxClient::checkLibrary('\Smalot\PdfParser\Parser', __DIR__.'/../vendor');
 	}
 
 	/**
