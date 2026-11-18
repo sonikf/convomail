@@ -12,7 +12,9 @@
  * \ingroup convomail
  * \brief   Three-pane mailbox: folders | message list | reading pane
  *
- * GET parameters: view (combined: the Combined Inbox, tpl/combined.tpl.php), accountid, folder, role (inbox|sent|drafts|junk|trash|archive), search, searchbody (also search message text),
+ * GET parameters: view (combined: the Combined Inbox, tpl/combined.tpl.php), accountid, folder, role (inbox|sent|drafts|junk|trash|archive),
+ *                 search (free words plus filters from:, subject:, since:, until:, see ConvomailSearch), searchbody (also search message text),
+ *                 fsender, fsubject, fsince, funtil (fields of the Filter panel, folded into search),
  *                 page, limit (page size, remembered), refresh, uid (open message), showimages
  * Listing a folder also files replies to project threads on their project (CONVOMAIL_AUTOFILE_REPLIES, on by default).
  */
@@ -31,22 +33,29 @@ if (!$res) {
 	die("Include of main fails");
 }
 
+/**
+ * @var HookManager $hookmanager
+ */
+
 require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
 dol_include_once('/convomail/class/convomailview.class.php');
 dol_include_once('/convomail/class/convomailcombined.class.php');
+dol_include_once('/convomail/class/convomailsearch.class.php');
 
 $langs->loadLangs(array('convomail@convomail', 'mails', 'companies', 'projects'));
 
 $accountid  = GETPOSTINT('accountid');
 $folder     = GETPOST('folder', 'restricthtml');
 $role       = GETPOST('role', 'aZ09');
-$search     = trim(GETPOST('search', 'alphanohtml'));
-$searchbody = ($search !== '' && GETPOSTINT('searchbody')) ? 1 : 0;
+$search     = ConvomailSearch::fromRequest();
+$searchparsed = ConvomailSearch::parse($search);
+$searchbody = ($searchparsed['words'] !== '' && GETPOSTINT('searchbody')) ? 1 : 0;
 $page       = max(0, GETPOSTINT('page'));
 $refresh    = GETPOSTINT('refresh');
 $openuid    = GETPOSTINT('uid');
 $showimages = GETPOSTINT('showimages');
 $limit      = GETPOSTINT('limit');
+$action     = GETPOST('action', 'aZ09');
 
 if (!isModEnabled('convomail') || !$user->hasRight('convomail', 'account', 'read')) {
 	accessforbidden();
@@ -75,7 +84,7 @@ if (getDolUserString('CONVOMAIL_LAST_VIEW') !== '') {
 }
 
 // "Show conversation" switch of the folder column, remembered for the user (only "off" is stored)
-if (GETPOST('action', 'aZ09') === 'setconversation' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($action === 'setconversation' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	dol_set_user_param($db, $conf, $user, array('CONVOMAIL_HIDE_CONVERSATION' => GETPOSTINT('showconversation') ? '' : '1'));
 	header('Location: '.$_SERVER['PHP_SELF'].'?accountid='.$accountid.'&folder='.urlencode($folder)
 		.($search !== '' ? '&search='.urlencode($search).($searchbody ? '&searchbody=1' : '') : '').($page > 0 ? '&page='.$page : '').($openuid > 0 ? '&uid='.$openuid : ''));
@@ -85,6 +94,16 @@ if (GETPOST('action', 'aZ09') === 'setconversation' && $_SERVER['REQUEST_METHOD'
 $account = convomail_get_usable_account($db, $user, $accountid);
 if ($accountid > 0 && !$account) {
 	accessforbidden();
+}
+
+// Other modules can act on the mailbox page (context convomailmailbox; the object is the open account, or none)
+// (the only action of the page, setconversation, is handled above: it changes a display preference only)
+$hookmanager->initHooks(array('convomailmailbox'));
+$object = $account ?: null;
+$parameters = array('accountid' => $accountid, 'folder' => $folder, 'search' => $search);
+$reshook = $hookmanager->executeHooks('doActions', $parameters, $object, $action);
+if ($reshook < 0) {
+	setEventMessages($hookmanager->error, $hookmanager->errors, 'errors');
 }
 
 llxHeader(convomail_assets(array('/convomail/css/convomail.css'), array('/convomail/js/convomail.js')), $langs->trans('Mailbox'), '', '', 0, 0, '', '', '', 'mod-convomail page-mailbox');
@@ -348,8 +367,10 @@ if ($canmanagefolders) {
 print '</select>';
 print '<form method="GET" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'" class="cm-search" data-searching="'.dol_escape_htmltag($langs->trans('ConvomailSearching')).'">';
 print '<input type="hidden" name="accountid" value="'.((int) $account->id).'"><input type="hidden" name="folder" value="'.dol_escape_htmltag($folder).'">';
-print '<input type="search" name="search" value="'.dol_escape_htmltag($search).'" placeholder="'.dol_escape_htmltag($langs->trans('ConvomailSearchFolder')).'" title="'.dol_escape_htmltag($langs->trans('ConvomailSearchHelp')).'">';
+// The box shows the free words; the filters are in the Filter panel
+print '<input type="search" name="search" value="'.dol_escape_htmltag($searchparsed['words']).'" placeholder="'.dol_escape_htmltag($langs->trans('ConvomailSearchFolder')).'" title="'.dol_escape_htmltag($langs->trans('ConvomailSearchHelp')).'">';
 print '<label class="cm-searchbody" title="'.dol_escape_htmltag($langs->trans('ConvomailSearchBodyHelp')).'"><input type="checkbox" name="searchbody" value="1"'.($searchbody ? ' checked' : '').'> '.$langs->trans('ConvomailSearchBody').'</label>';
+print ConvomailSearch::panelHtml($searchparsed, $selfbase);
 print '</form>';
 print '<span class="cm-paging">';
 print '<form method="GET" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'" class="cm-pagesize">';
@@ -383,7 +404,7 @@ if ($listerror !== '') {
 	print '<div class="cm-empty error">'.dol_escape_htmltag($listerror).'</div>';
 } elseif (empty($messages)) {
 	print '<div class="cm-empty">'.$langs->trans($search !== '' ? 'ConvomailNoMatch' : 'ConvomailNoMessage');
-	if ($search !== '' && !$searchbody) {
+	if ($searchparsed['words'] !== '' && !$searchbody) {
 		// Nothing in sender, recipients or subject: offer the slower search in the message text
 		print '<br><a href="'.dol_escape_htmltag($selfbase.'&search='.urlencode($search).'&searchbody=1').'">'.$langs->trans('ConvomailSearchInTextToo').'</a>';
 	}

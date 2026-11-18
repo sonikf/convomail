@@ -5,6 +5,14 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /**
@@ -113,7 +121,7 @@ function convomail_test_smtp(ConvomailAccount $account)
 }
 
 /**
- * Load an enabled account the current user may use (own account, or any with the admin right)
+ * Load an enabled account the current user may use (own, granted, or another user's with a read right)
  *
  * @param  DoliDB $db        Database
  * @param  User   $user      Current user
@@ -127,6 +135,7 @@ function convomail_get_usable_account($db, $user, $accountid = 0)
 	$account = new ConvomailAccount($db);
 	if ($accountid > 0) {
 		if ($account->fetch($accountid) > 0 && $account->canBeUsedBy($user) && (int) $account->status === ConvomailAccount::STATUS_ENABLED) {
+			convomail_log_read($db, $user, $account);
 			return $account;
 		}
 		return null;
@@ -705,7 +714,7 @@ function convomail_account_form_script($iscreate)
 		$("#convomail_preset").on("change", function () { applyPreset($(this).val()); });
 		// A preset ticks the box; typing another server over it must not leave that server without Sent copies
 		$("[name=smtp_host]").on("change", function () {
-			if (!'.ConvomailAccount::SAVES_SENT_HOSTS.'.test($.trim($(this).val()))) { $("[name=server_saves_sent]").prop("checked", false); }
+			if (!'.ConvomailAccount::SAVES_SENT_HOSTS.'.test(String($(this).val()).trim())) { $("[name=server_saves_sent]").prop("checked", false); }
 		});
 		function onMethod(firsttime) {
 			var m = $("#auth_method").val() || "password";
@@ -917,4 +926,58 @@ function convomail_filing_explanation($admin = false)
 		$out .= '<li>'.$langs->trans('ConvomailFilingLimit').'</li>';
 	}
 	return $out.'</ul></details>';
+}
+
+/**
+ * Antivirus check of a file about to be sent (core's dolCheckVirus()); a file that fails is deleted
+ *
+ * @param  string $path File
+ * @param  string $name Name shown in the error
+ * @return bool         True when the file may be sent
+ */
+function convomail_virus_free($path, $name)
+{
+	/** @var Translate $langs */
+	global $langs;
+
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+	$virus = dolCheckVirus($path, $name);
+	if (empty($virus)) {
+		return true;
+	}
+	dol_delete_file($path, 1, 1, 1, null, false, 0);
+	setEventMessages($langs->trans('ErrorFileIsInfectedWithAVirus').': '.$name, $virus, 'errors');
+	return false;
+}
+
+/**
+ * Record in Dolibarr's security events when a user reads another user's mailbox through a read right, once per session
+ *
+ * @param  DoliDB           $db      Database
+ * @param  User             $user    Reader
+ * @param  ConvomailAccount $account Mailbox read
+ * @return void
+ */
+function convomail_log_read($db, $user, $account)
+{
+	/** @var Translate $langs */
+	global $langs;
+
+	$why = $account->readAccess($user);
+	$logged = (isset($_SESSION['convomail_read_logged']) && is_array($_SESSION['convomail_read_logged'])) ? $_SESSION['convomail_read_logged'] : array();
+	if (!in_array($why, array('all', 'hierarchy'), true) || !empty($logged[(int) $account->id])) {
+		return;
+	}
+	require_once DOL_DOCUMENT_ROOT.'/core/class/events.class.php';
+	$langs->load('convomail@convomail');
+	$event = new Events($db);
+	$event->type = 'CONVOMAIL_READ_OTHER';
+	$event->dateevent = dol_now();
+	$event->description = $langs->transnoentitiesnoconv($why === 'all' ? 'ConvomailReadLogAll' : 'ConvomailReadLogHierarchy', (is_string($account->email) ? $account->email : ''), (string) $account->id);
+	if ($event->create($user) > 0) {
+		$logged[(int) $account->id] = 1;
+		$_SESSION['convomail_read_logged'] = $logged;
+	} else {
+		dol_syslog(__FUNCTION__.' '.$event->error, LOG_WARNING);
+	}
 }

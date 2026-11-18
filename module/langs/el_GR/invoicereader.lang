@@ -1,0 +1,28 @@
+# Copyright (C) 2026 DPG Supply
+
+# Invoice reading component (class/convomaileinvoice, convomailpdfembedded, convomailinvoiceai, convomailinvoicereader)
+# Problems found while reading an invoice. Arguments are field names, line numbers or an AI service's error message, never text from the document.
+InvoiceReaderAiError = Η υπηρεσία AI επέστρεψε σφάλμα.
+InvoiceReaderAiOff = Η ενότητα AI δεν είναι ενεργή.
+InvoiceReaderAiErrorDetail = Η υπηρεσία AI επέστρεψε σφάλμα: %s
+InvoiceReaderAiTooLong = Η απάντηση του AI είναι πολύ μεγάλη.
+InvoiceReaderAiNotJson = Δεν ήταν δυνατή η ανάγνωση της απάντησης του AI.
+InvoiceReaderFieldIgnored = Ένα μη αναμενόμενο πεδίο (%s) αγνοήθηκε.
+InvoiceReaderUnnamedFieldIgnored = Ένα μη αναμενόμενο πεδίο αγνοήθηκε.
+InvoiceReaderFieldRejected = Η τιμή που διαβάστηκε για το %s δεν χρησιμοποιήθηκε: δεν είναι έγκυρη.
+InvoiceReaderFieldPlaceholder = Η τιμή που διαβάστηκε για το %s δεν χρησιμοποιήθηκε: είναι δείκτης θέσης απορρήτου.
+InvoiceReaderDateOutOfRange = Η ημερομηνία που διαβάστηκε για το %s δεν χρησιμοποιήθηκε: απέχει περισσότερο από 2 χρόνια.
+InvoiceReaderDueBeforeDate = Η ημερομηνία λήξης είναι πριν από την ημερομηνία του τιμολογίου.
+InvoiceReaderTooManyLines = Κρατήθηκαν μόνο οι πρώτες %s γραμμές ΦΠΑ.
+InvoiceReaderLineRejected = Η γραμμή ΦΠΑ %s δεν χρησιμοποιήθηκε: δεν είναι έγκυρη.
+InvoiceReaderLinePlaceholder = Η γραμμή ΦΠΑ %s δεν χρησιμοποιήθηκε: περιέχει δείκτη θέσης απορρήτου.
+InvoiceReaderLineFieldsIgnored = Η γραμμή ΦΠΑ %s είχε μη αναμενόμενα πεδία, που αγνοήθηκαν.
+InvoiceReaderLineVatMismatch = Γραμμή ΦΠΑ %s: το ποσό ΦΠΑ δεν ισούται με το ποσό επί τον συντελεστή.
+InvoiceReaderLinesNetMismatch = Οι γραμμές ΦΠΑ δεν αθροίζουν στο σύνολο χωρίς ΦΠΑ.
+InvoiceReaderLinesVatMismatch = Οι γραμμές ΦΠΑ δεν αθροίζουν στο σύνολο ΦΠΑ.
+InvoiceReaderTotalMismatch = Το σύνολο χωρίς ΦΠΑ συν τον ΦΠΑ δεν ισούται με το σύνολο.
+InvoiceReaderLinesTotalMismatch = Οι γραμμές ΦΠΑ δεν αθροίζουν στο σύνολο.
+InvoiceReaderNoRates = Δεν είναι γνωστοί συντελεστές ΦΠΑ για τη χώρα της εταιρείας σας: οι συντελεστές δεν ελέγχθηκαν.
+InvoiceReaderRateUnknown = Γραμμή ΦΠΑ %s: ο συντελεστής δεν είναι ένας από τους συντελεστές ΦΠΑ της χώρας σας.
+InvoiceReaderEncryptedPdf = Ένα PDF προστατεύεται με κωδικό και δεν ήταν δυνατή η ανάγνωσή του.
+InvoiceReaderCurrencyUnknown = Το νόμισμα του τιμολογίου δεν υπάρχει στο λεξικό νομισμάτων.

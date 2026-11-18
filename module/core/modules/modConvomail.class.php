@@ -5,6 +5,14 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 /**
@@ -146,6 +154,13 @@ class modConvomail extends DolibarrModules
 		$this->rights[$r][4] = 'account';
 		$this->rights[$r][5] = 'admin';
 
+		// Reading other users' mail is its own right, not part of managing their accounts (each read is logged)
+		$r++;
+		$this->rights[$r] = array(0 => 19428204, 1 => 'Read the mailboxes of all users', 2 => 'r', 3 => 0, 4 => 'account', 5 => 'readall');
+
+		$r++;
+		$this->rights[$r] = array(0 => 19428205, 1 => 'Read the mailboxes of subordinates', 2 => 'r', 3 => 0, 4 => 'account', 5 => 'readhierarchy');
+
 		// Menus
 		// Mailbox tab for users allowed to use their own mail accounts. Users without an account yet
 		// land on a prompt to add one (mailbox.php).
@@ -271,14 +286,57 @@ class modConvomail extends DolibarrModules
 			return -1;
 		}
 
+		// Sent messages are logged with the core "Send Email" event type, which is inactive by default.
+		// Remembered when Convomail activates it, so remove() puts it back as it was.
+		$resql = $this->db->query("SELECT active FROM ".MAIN_DB_PREFIX."c_actioncomm WHERE code = 'AC_EMAIL'");
+		$obj = ($resql && $resql !== true) ? $this->db->fetch_object($resql) : null;
+		if ($obj && empty($obj->active)) {
+			dolibarr_set_const($this->db, 'CONVOMAIL_ACTIVATED_AC_EMAIL', '1', 'chaine', 0, 'Convomail activated the Send Email event type', 0);
+		}
 		$sql = array(
-			// Sent messages are logged with the core "Send Email" event type, which is inactive by default
 			"UPDATE ".MAIN_DB_PREFIX."c_actioncomm SET active = 1 WHERE code = 'AC_EMAIL'",
 		);
 
 		$this->delete_menus();
 
-		return $this->_init($sql, $options);
+		$result = $this->_init($sql, $options);
+		if ($result > 0 && $this->migrateReadRights() < 0) {
+			return -1;
+		}
+		return $result;
+	}
+
+	/**
+	 * Once: users and groups holding "Manage the mail accounts of all users" get "Read the mailboxes of all users",
+	 * which that right used to include (before 1.4.0)
+	 *
+	 * @return int 1 if OK, -1 if KO
+	 */
+	public function migrateReadRights()
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+
+		if (getDolGlobalInt('CONVOMAIL_RIGHTS_SPLIT')) {
+			return 1;
+		}
+		$sql = array(
+			"INSERT INTO ".MAIN_DB_PREFIX."user_rights (entity, fk_user, fk_id) SELECT r.entity, r.fk_user, 19428204 FROM ".MAIN_DB_PREFIX."user_rights as r WHERE r.fk_id = 19428203 AND NOT EXISTS (SELECT n.rowid FROM ".MAIN_DB_PREFIX."user_rights as n WHERE n.entity = r.entity AND n.fk_user = r.fk_user AND n.fk_id = 19428204)",
+			"INSERT INTO ".MAIN_DB_PREFIX."usergroup_rights (entity, fk_usergroup, fk_id) SELECT r.entity, r.fk_usergroup, 19428204 FROM ".MAIN_DB_PREFIX."usergroup_rights as r WHERE r.fk_id = 19428203 AND NOT EXISTS (SELECT n.rowid FROM ".MAIN_DB_PREFIX."usergroup_rights as n WHERE n.entity = r.entity AND n.fk_usergroup = r.fk_usergroup AND n.fk_id = 19428204)",
+		);
+		foreach ($sql as $query) {
+			if (!$this->db->query($query)) {
+				dol_syslog(__METHOD__.' '.$this->db->lasterror(), LOG_ERR);
+				return -1;
+			}
+		}
+		dolibarr_set_const($this->db, 'CONVOMAIL_RIGHTS_SPLIT', '1', 'chaine', 0, 'Reading other users\' mailboxes has its own right', 0);
+		// The current user's rights were loaded before: reload them, or an admin would lose reading for this request
+		global $user;
+		if ($user instanceof User && $user->id > 0) {
+			$user->clearrights();
+			$user->loadRights();
+		}
+		return 1;
 	}
 
 	/**
@@ -315,6 +373,9 @@ class modConvomail extends DolibarrModules
 
 			$this->delete_menus();
 			$this->insert_menus();
+			// Rights added by a newer version, and the read right split from the admin one (1.4.0)
+			$this->insert_permissions(0);
+			$this->migrateReadRights();
 			// Top menu icon (1.2.0), and a new theme CSS revision so browsers don't keep the old one
 			dolibarr_set_const($this->db, 'MAIN_MODULE_CONVOMAIL_ICON', $this->picto, 'chaine', 0, 'Top menu icon of Convomail', 0);
 			dolibarr_set_const($this->db, 'MAIN_IHM_PARAMS_REV', getDolGlobalInt('MAIN_IHM_PARAMS_REV') + 1, 'chaine', 0, '', $conf->entity);
@@ -339,6 +400,18 @@ class modConvomail extends DolibarrModules
 	 */
 	public function remove($options = '')
 	{
-		return $this->_remove(array(), $options);
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+
+		$sql = array();
+		// The "Send Email" event type goes back to inactive only if Convomail activated it (see init())
+		$restore = getDolGlobalInt('CONVOMAIL_ACTIVATED_AC_EMAIL');
+		if ($restore) {
+			$sql[] = "UPDATE ".MAIN_DB_PREFIX."c_actioncomm SET active = 0 WHERE code = 'AC_EMAIL'";
+		}
+		$result = $this->_remove($sql, $options);
+		if ($result > 0 && $restore) {
+			dolibarr_del_const($this->db, 'CONVOMAIL_ACTIVATED_AC_EMAIL', 0);
+		}
+		return $result;
 	}
 }

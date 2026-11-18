@@ -29,6 +29,11 @@ if (!$res) {
 	die("Include of main fails");
 }
 
+/**
+ * @var Translate $langs
+ * @var HookManager $hookmanager
+ */
+
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
 dol_include_once('/convomail/class/convomailview.class.php');
 
@@ -57,6 +62,17 @@ $listurl = dol_buildpath('/convomail/mailbox.php', 1).'?accountid='.((int) $acco
 $selfurl = $_SERVER['PHP_SELF'].'?accountid='.((int) $account->id).'&folder='.urlencode($folder).'&uid='.((int) $uid);
 
 $client = new ConvomailHordeMailboxClient($account);
+
+// Other modules can act on the message page (context convomailmessage; the object is the account); a hook that
+// handled the action (> 0) replaces ours
+$hookmanager->initHooks(array('convomailmessage'));
+$parameters = array('folder' => $folder, 'uid' => $uid);
+$reshook = $hookmanager->executeHooks('doActions', $parameters, $account, $action);
+if ($reshook < 0) {
+	setEventMessages($hookmanager->error, $hookmanager->errors, 'errors');
+} elseif ($reshook > 0) {
+	$action = '';
+}
 
 
 /*
@@ -179,7 +195,7 @@ if ($action == 'thirdpartycreated') {
 			print '<span class="opacitymedium">'.dol_escape_htmltag($addr).'</span></td></tr>';
 		}
 		if ($message !== false && !$logged) {
-			print '<tr><td class="titlefieldcreate" colspan="2"><label><input type="checkbox" name="logit" value="1" checked> '.$langs->trans('ConvomailLogThisEmailOn', dol_escape_htmltag($soc->name)).'</label></td></tr>';
+			print '<tr><td class="titlefieldcreate" colspan="2"><label><input type="checkbox" name="logit" value="1" checked> '.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailLogThisEmailOn', $soc->name)).'</label></td></tr>';
 		}
 		print '</table>';
 		print '<div class="center"><input type="submit" class="button button-save" value="'.dol_escape_htmltag($langs->trans('Save')).'"> ';
