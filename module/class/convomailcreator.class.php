@@ -352,12 +352,12 @@ class ConvomailCreator
 			}
 		}
 		if ($type === 'invoice_supplier' && !empty($email['pdfhashes'])) {
-			$in = array();
+			$sqlin = array();
 			foreach ($email['pdfhashes'] as $hash) {
-				$in[] = "'".$this->db->escape($hash)."'";
+				$sqlin[] = "'".$this->db->escape($hash)."'";
 			}
 			$sql = 'SELECT f.rowid, f.ref FROM '.MAIN_DB_PREFIX.'ecm_files as e JOIN '.MAIN_DB_PREFIX."facture_fourn as f ON e.src_object_type = 'facture_fourn' AND e.src_object_id = f.rowid";
-			$sql .= ' WHERE e.label IN ('.implode(',', $in).') AND f.entity IN ('.getEntity('supplier_invoice').')';
+			$sql .= ' WHERE e.label IN ('.implode(',', $sqlin).') AND f.entity IN ('.getEntity('supplier_invoice').')';
 			$resql = $this->db->query($sql);
 			if ($resql && ($obj = $this->db->fetch_object($resql))) {
 				$out['warn'][] = $langs->trans('ConvomailDupSupplierFile', $link('facture_fourn', $obj->rowid, $obj->ref));
@@ -453,8 +453,8 @@ class ConvomailCreator
 		$inv->label = $v['subject'];
 		$inv->date = $v['date'];
 		$inv->fk_project = (int) $v['projectid'];
-		$inv->cond_reglement_id = (int) ($soc->cond_reglement_supplier_id ?? 0);
-		$inv->mode_reglement_id = (int) ($soc->mode_reglement_supplier_id ?? 0);
+		$inv->cond_reglement_id = (int) $soc->cond_reglement_supplier_id;
+		$inv->mode_reglement_id = (int) $soc->mode_reglement_supplier_id;
 		$inv->date_echeance = !empty($v['date_due']) ? $v['date_due'] : $inv->calculate_date_lim_reglement($inv->cond_reglement_id);
 		$id = $inv->create($user);
 		if ($id <= 0) {
@@ -584,8 +584,8 @@ class ConvomailCreator
 		$quote = new SupplierProposal($this->db);
 		$quote->socid = (int) $v['socid'];
 		$quote->fk_project = (int) $v['projectid'];
-		$quote->cond_reglement_id = (int) ($soc->cond_reglement_supplier_id ?? 0);
-		$quote->mode_reglement_id = (int) ($soc->mode_reglement_supplier_id ?? 0);
+		$quote->cond_reglement_id = (int) $soc->cond_reglement_supplier_id;
+		$quote->mode_reglement_id = (int) $soc->mode_reglement_supplier_id;
 		$quote->note_private = $v['subject'];
 		$id = $quote->create($user);
 		if ($id <= 0) {
@@ -672,7 +672,7 @@ class ConvomailCreator
 		$project->description = dol_trunc((string) $email['text'], 5000, 'right', 'UTF-8', 1);
 		$project->socid = (int) $v['socid'];
 		$project->date_start = dol_now();
-		$project->statut = 0;
+		$project->status = 0;
 		$project->public = 0;
 		$project->usage_task = 1;
 		$project->email_msgid = (string) $email['msgid'];

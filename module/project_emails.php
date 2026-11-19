@@ -14,7 +14,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -26,6 +26,15 @@ if (!$res && file_exists("../../../main.inc.php")) {
 if (!$res) {
 	die("Include of main fails");
 }
+
+/**
+ * @var DoliDB $db
+ * @var Translate $langs
+ * @var User $user
+ */
+'@phan-var-force DoliDB $db';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/project.lib.php';

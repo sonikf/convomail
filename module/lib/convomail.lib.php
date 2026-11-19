@@ -494,7 +494,7 @@ function convomail_project_contacts($db, $projectid)
 			while ($obj = $db->fetch_object($resql)) {
 				$key = strtolower($obj->email);
 				if (!isset($out[$key]) && isValidEmail($obj->email)) {
-					$out[$key] = array('name' => trim($obj->firstname.' '.$obj->lastname), 'email' => $obj->email, 'role' => (string) $obj->poste);
+					$out[$key] = array('name' => trim($obj->firstname.' '.$obj->lastname), 'email' => (string) $obj->email, 'role' => (string) $obj->poste);
 				}
 			}
 		}
@@ -571,11 +571,11 @@ function convomail_account_from_post(ConvomailAccount $account)
 	$method = GETPOST('auth_method', 'aZ09');
 	$app = ($method !== 'password') ? ConvomailOAuth::appFor($method) : '';
 	if ($app !== '') {
-		if ($account->id > 0 && $account->isOAuth() && ConvomailOAuth::providerOfApp($account->oauth_app) !== $method) {
+		if ($account->id > 0 && $account->isOAuth() && ConvomailOAuth::providerOfApp((string) $account->oauth_app) !== $method) {
 			// Another provider: the old token is of no use
 			(new ConvomailOAuth($account->db))->disconnect($account);
 		}
-		if (!$account->isOAuth() || ConvomailOAuth::providerOfApp($account->oauth_app) !== $method) {
+		if (!$account->isOAuth() || ConvomailOAuth::providerOfApp((string) $account->oauth_app) !== $method) {
 			$account->oauth_app = $app;
 		}
 		$account->auth_type = ConvomailAccount::AUTH_OAUTH;
@@ -645,7 +645,7 @@ function convomail_account_form_fields(ConvomailAccount $account, $iscreate, $fo
 	}
 
 	if (count($authmethods) > 1 || $account->isOAuth()) {
-		$currentmethod = $account->isOAuth() ? ConvomailOAuth::providerOfApp($account->oauth_app) : 'password';
+		$currentmethod = $account->isOAuth() ? ConvomailOAuth::providerOfApp((string) $account->oauth_app) : 'password';
 		print '<tr><td class="titlefieldcreate">'.$langs->trans('ConvomailAuthType').'</td><td>';
 		print $form->selectarray('auth_method', $authmethods, $currentmethod, 0, 0, 0, '', 0, 0, 0, '', 'minwidth200');
 		print ' '.$form->textwithpicto('', $langs->trans('ConvomailAuthTypeHelp'));
@@ -839,9 +839,9 @@ function convomail_filing_cell(ConvomailAccount $account, User $user, $formurl, 
 		foreach ($hidden as $name => $value) {
 			$more .= '<input type="hidden" name="'.dol_escape_htmltag($name).'" value="'.dol_escape_htmltag((string) $value).'">';
 		}
-		return '<form method="POST" action="'.dol_escape_htmltag($formurl).'" class="inline-block">'
-			.'<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="'.$action.'">'
-			.'<input type="hidden" name="accountid" value="'.((int) $account->id).'">'.$more
+		return '<form method="POST" action="'.dol_escape_htmltag($formurl)
+			.'" class="inline-block"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="'.$action
+			.'"><input type="hidden" name="accountid" value="'.((int) $account->id).'">'.$more
 			.'<button type="submit" class="button smallpaddingimp classfortooltip'.($primary ? '' : ' button-cancel').'" title="'.dol_escape_htmltag($help).'">'.dol_escape_htmltag($label).'</button></form>';
 	};
 
@@ -980,4 +980,21 @@ function convomail_log_read($db, $user, $account)
 	} else {
 		dol_syslog(__FUNCTION__.' '.$event->error, LOG_WARNING);
 	}
+}
+
+/**
+ * JSON answer of an AJAX endpoint; ends the request
+ *
+ * @param  array<string,mixed> $data Response
+ * @param  int                 $code HTTP status
+ * @return never
+ */
+function convomail_json($data, $code = 200)
+{
+	global $db;
+	http_response_code($code);
+	top_httphead('application/json');
+	print json_encode($data);
+	$db->close();
+	exit;
 }

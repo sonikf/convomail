@@ -234,7 +234,7 @@ class ConvomailCollector
 		foreach (array(self::IN, self::OUT) as $which) {
 			$collector = $this->load($account, $which);
 			$isnew = !$collector;
-			if ($isnew) {
+			if (!$collector) {
 				$collector = new EmailCollector($this->db);
 				$collector->ref = self::ref($account, $which);
 				$collector->maxemailpercollect = 100;

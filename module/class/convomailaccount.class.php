@@ -30,6 +30,7 @@ class ConvomailAccount extends CommonObject
 	public $module = 'convomail';
 	public $element = 'convomailaccount';
 	public $table_element = 'convomail_account';
+	/** @var string Picto */
 	public $picto = 'email';
 	public $ismultientitymanaged = 1;
 	public $isextrafieldmanaged = 0;
@@ -50,7 +51,8 @@ class ConvomailAccount extends CommonObject
 	const SAVES_SENT_HOSTS = '/(^|\.)(gmail|googlemail|office365|outlook|me|icloud|yahoo|aol)\.com$/i';
 
 	/**
-	 * @var array<string,array<string,mixed>> Field definitions used by the *Common() methods
+	 * @inheritdoc
+	 * Field definitions used by the *Common() methods
 	 */
 	public $fields = array(
 		'rowid'           => array('type' => 'integer', 'label' => 'TechnicalID', 'enabled' => 1, 'visible' => 0, 'notnull' => 1, 'position' => 1),
@@ -80,25 +82,40 @@ class ConvomailAccount extends CommonObject
 		'import_key'      => array('type' => 'varchar(14)', 'label' => 'ImportId', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 1001),
 	);
 
+	/** @var int ID */
 	public $rowid;
 	public $entity;
+	/** @var ?int Owner; SHARED_OWNER (0) for a shared mailbox, null on a new account */
 	public $fk_user;
+	/** @var string Name shown as sender */
 	public $label;
+	/** @var string Address */
 	public $email;
+	/** @var string IMAP host */
 	public $imap_host;
+	/** @var int IMAP port */
 	public $imap_port;
+	/** @var string ssl, tls or none */
 	public $imap_encryption;
+	/** @var string SMTP host */
 	public $smtp_host;
+	/** @var int SMTP port */
 	public $smtp_port;
+	/** @var string ssl, tls or none */
 	public $smtp_encryption;
+	/** @var string Login */
 	public $login;
 	/** @var string 'password' or 'oauth' */
 	public $auth_type = 'password';
-	/** @var string Core OAuth app key (e.g. GOOGLE-Mail) when auth_type is 'oauth' */
+	/** @var ?string Core OAuth app key (e.g. GOOGLE-Mail) when auth_type is 'oauth', else null */
 	public $oauth_app;
+	/** @var string Password, encrypted with dolEncrypt() */
 	public $pass_crypted;
+	/** @var string Folder that keeps sent mail */
 	public $sent_folder;
+	/** @var int 1 when the SMTP server keeps its own Sent copy */
 	public $server_saves_sent;
+	/** @var int 1 for the user's default account */
 	public $is_default;
 	public $status;
 	public $date_creation;
@@ -699,7 +716,7 @@ class ConvomailAccount extends CommonObject
 	 */
 	public static function allowedHostPatterns($value)
 	{
-		return array_values(array_unique(preg_split('/(?:\\\\[rn]|[\s,;])+/', strtolower(trim((string) $value)), -1, PREG_SPLIT_NO_EMPTY)));
+		return array_values(array_unique(preg_split('/(?:\\\\[rn]|[\s,;])+/', strtolower(trim((string) $value)), -1, PREG_SPLIT_NO_EMPTY) ?: array()));
 	}
 
 	/**
@@ -883,6 +900,7 @@ class ConvomailAccount extends CommonObject
 		return $this->LibStatut($this->status, $mode);
 	}
 
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
 	/**
 	 * @param  int    $status Status
 	 * @param  int    $mode   Display mode

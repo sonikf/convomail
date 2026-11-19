@@ -200,8 +200,10 @@ class ConvomailFiler
 			$ext = $m[2];
 		}
 		$path = $dir.'/'.$name;
-		for ($i = 2; file_exists($path) && $i < 1000; $i++) {
+		$i = 2;
+		while (file_exists($path) && $i < 1000) {
 			$path = $dir.'/'.$base.'-'.$i.$ext;
+			$i++;
 		}
 		return $path;
 	}

@@ -205,7 +205,7 @@ class ActionsConvomail
 
 		// Third party, contact and project cards already have core's "Send email" button: no second one here.
 		// Sending that form through the user's mailbox is planned (docs/ROADMAP.md, "Core's Send email through the user's mailbox").
-		if (in_array('actioncard', $contexts) && $object->element === 'action') {
+		if (in_array('actioncard', $contexts) && $object instanceof ActionComm) {
 			if (!empty($object->email_msgid) && in_array($object->type_code, array('AC_EMAIL', 'AC_EMAILIN_AUTO', 'AC_OTH_AUTO'))) {
 				print dolGetButtonAction('', $langs->trans('ConvomailReply'), 'default', $compose.'?replyto='.((int) $object->id), '', true);
 			}

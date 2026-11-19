@@ -32,6 +32,7 @@ docker compose up -d
 - Fixtures, seed scripts and the end-to-end check: [dev/README.md](dev/README.md).
 - Database: `docker compose exec -T db mariadb -udolibarr -pdolibarr dolibarr -e "..."`.
 - Lint: `docker compose exec -T dolibarr php -l /var/www/html/custom/convomail/<file>`.
+- Static analysis: `dev/check.sh` (doli-check with Document Browser read for its classes).
 
 **Testing a change:**
 1. Lint the PHP.

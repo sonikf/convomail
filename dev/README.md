@@ -10,6 +10,7 @@ Scripts for the local Docker stack (`docker-compose.yml` at the repo root). None
 | `seed_projects.py` | Sends the three project-detection cases: a reply to a logged email (**thread**), a message whose References carry `-proj1@` (**code**), a new message from Dana (**suggested**) | Host |
 | `e2e.sh` | Checks with curl and SQL: send with attachment (event, attachment copied, delivered), host allowlist refused on save, SMTP failure gives an error and no event, salesrep cannot reach admin's account | Host |
 | `invoices/` | Invoice reading: `run.sh` makes the fixtures (Factur-X PDFs with core TCPDF, UBL/CII XML, hostile files) and runs the CLI checks; `suppliers.php` and `seed_mail.py` set up the **Fill from the invoice** panel cases. See `invoices/README.md` | Container (`run.sh`, `suppliers.php`), host (`seed_mail.py`) |
+| `check.sh` | Static analysis gate: `doli-check` (php -l, phpcs, PHPStan, Phan with Dolibarr's develop rules) with Document Browser (`../doli-docbrowser`, or `DOLI_DOCBROWSER_DIR`) read for its classes. `--refresh` pulls the latest rules first | Host |
 
 ## Setup, once
 

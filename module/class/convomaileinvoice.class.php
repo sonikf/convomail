@@ -68,7 +68,7 @@ class ConvomailEInvoice
 		}
 		if (($root->namespaceURI === self::NS_UBL_INVOICE && $root->localName === 'Invoice')
 			|| ($root->namespaceURI === self::NS_UBL_CREDITNOTE && $root->localName === 'CreditNote')) {
-			$xp->registerNamespace('doc', $root->namespaceURI);
+			$xp->registerNamespace('doc', (string) $root->namespaceURI);
 			$xp->registerNamespace('cac', self::NS_CAC);
 			$xp->registerNamespace('cbc', self::NS_CBC);
 			return self::parseUbl($xp, $root->localName === 'CreditNote');
@@ -132,7 +132,7 @@ class ConvomailEInvoice
 
 	/**
 	 * @param  DOMXPath $xp XPath with rsm/ram/udt registered
-	 * @return array
+	 * @return array<string,mixed>
 	 */
 	private static function parseCii(DOMXPath $xp)
 	{
@@ -177,7 +177,7 @@ class ConvomailEInvoice
 	/**
 	 * @param  DOMXPath $xp         XPath with doc/cac/cbc registered
 	 * @param  bool     $creditnote True for a UBL CreditNote root
-	 * @return array
+	 * @return array<string,mixed>
 	 */
 	private static function parseUbl(DOMXPath $xp, $creditnote)
 	{
@@ -227,7 +227,7 @@ class ConvomailEInvoice
 
 	/**
 	 * @param  string $syntax 'cii' or 'ubl'
-	 * @return array
+	 * @return array<string,mixed>
 	 */
 	private static function emptyHints($syntax)
 	{

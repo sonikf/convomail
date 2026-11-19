@@ -248,7 +248,7 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 
 			$used = array_slice($this->newestFirst($imap, $folder, $imap->search($folder)['match']->ids, true), 0, $count);
 			$lines[] = 'Module order (newest arrival first): '.implode(',', $used);
-			$bydate = $imap->search($folder, null, array('sort' => array(Horde_Imap_Client::SORT_REVERSE, Horde_Imap_Client::SORT_DATE)));
+			$bydate = $imap->search($folder, new Horde_Imap_Client_Search_Query(), array('sort' => array(Horde_Imap_Client::SORT_REVERSE, Horde_Imap_Client::SORT_DATE)));
 			$lines[] = 'Server sort by Date header:          '.implode(',', array_slice($bydate['match']->ids, 0, $count));
 
 			$query = new Horde_Imap_Client_Fetch_Query();
@@ -453,6 +453,7 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 	 * @param  int[]                    $uids   UIDs: a search result, or the whole folder
 	 * @param  bool                     $whole  $uids is the whole folder: the times of messages gone are dropped
 	 * @param  array<int,int>|null      $times  Set to the arrival time by UID (0 when the server gave none)
+	 * @param-out array<int,int>        $times
 	 * @return int[]
 	 */
 	private function newestFirst($imap, $folder, array $uids, $whole = false, &$times = null)
@@ -691,13 +692,13 @@ class ConvomailHordeMailboxClient implements ConvomailMailboxClient
 				$result['unseen'][(string) $name] = (int) ($counts['unseen'] ?? 0);
 			}
 			if ($sinceUid >= 0 && $uidnext > $sinceUid + 1) {
-				$from = max($sinceUid + 1, $uidnext - 1000);
+				$fromuid = max($sinceUid + 1, $uidnext - 1000);
 				$query = new Horde_Imap_Client_Search_Query();
-				$query->ids(new Horde_Imap_Client_Ids(range($from, $uidnext - 1)));
+				$query->ids(new Horde_Imap_Client_Ids(range($fromuid, $uidnext - 1)));
 				$found = array_filter(array_map('intval', $imap->search($folder, $query)['match']->ids), function ($uid) use ($sinceUid) {
 					return $uid > $sinceUid;
 				});
-				$result['new'] = count($found) + ($from > $sinceUid + 1 ? $from - $sinceUid - 1 : 0);
+				$result['new'] = count($found) + ($fromuid > $sinceUid + 1 ? $fromuid - $sinceUid - 1 : 0);
 				$result['newest'] = $found ? max($found) : $result['newest'];
 			}
 			return $result;
@@ -1823,7 +1824,7 @@ class ConvomailTraceMaskFilter extends php_user_filter
 	 * @param  resource $out      Outgoing bucket brigade
 	 * @param  int      $consumed Bytes consumed
 	 * @param  bool     $closing  Stream closing
-	 * @return int
+	 * @return int                 PSFS_PASS_ON
 	 */
 	public function filter($in, $out, &$consumed, $closing): int
 	{

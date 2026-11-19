@@ -46,12 +46,10 @@ if (!defined('NOSESSION')) {
 
 // Multicompany: entity of the message, from the URL
 $entity = (!empty($_GET['entity']) ? (int) $_GET['entity'] : 1);
-if (is_numeric($entity)) {
-	define('DOLENTITY', $entity);
-}
+define('DOLENTITY', $entity);
 
 $res = 0;
-if (!$res && file_exists("../../main.inc.php")) {
+if (file_exists("../../main.inc.php")) {
 	$res = @include "../../main.inc.php";
 }
 if (!$res && file_exists("../../../main.inc.php")) {
@@ -60,6 +58,11 @@ if (!$res && file_exists("../../../main.inc.php")) {
 if (!$res && file_exists("../../../../main.inc.php")) {
 	$res = @include "../../../../main.inc.php";
 }
+
+/**
+ * @var DoliDB $db
+ */
+'@phan-var-force DoliDB $db';
 
 /*
  * Actions

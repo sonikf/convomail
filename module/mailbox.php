@@ -20,7 +20,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -34,8 +34,17 @@ if (!$res) {
 }
 
 /**
+ * @var Conf $conf
+ * @var DoliDB $db
  * @var HookManager $hookmanager
+ * @var Translate $langs
+ * @var User $user
  */
+'@phan-var-force Conf $conf';
+'@phan-var-force DoliDB $db';
+'@phan-var-force HookManager $hookmanager';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
 dol_include_once('/convomail/class/convomailview.class.php');
@@ -248,23 +257,23 @@ $total = ($list !== false) ? (int) $list['total'] : 0;
 $first = $total ? $page * $limit + 1 : 0;
 $last = min($total, ($page + 1) * $limit);
 
-print '<div class="cm-app" data-accountid="'.((int) $account->id).'" data-folder="'.dol_escape_htmltag($folder).'" data-token="'.newToken().'"'
-	.' data-ajax-message="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/message.php', 1)).'"'
-	.' data-ajax-action="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/action.php', 1)).'"'
-	.' data-page-message="'.dol_escape_htmltag(dol_buildpath('/convomail/message.php', 1)).'"'
-	.' data-self="'.dol_escape_htmltag($selfbase.$listparam).'"'
-	.' data-confirm-delete="'.dol_escape_htmltag($langs->trans('ConvomailConfirmDelete')).'"'
+print '<div class="cm-app" data-accountid="'.((int) $account->id).'" data-folder="'.dol_escape_htmltag($folder).'" data-token="'.newToken()
+	.'" data-ajax-message="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/message.php', 1))
+	.'" data-ajax-action="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/action.php', 1))
+	.'" data-page-message="'.dol_escape_htmltag(dol_buildpath('/convomail/message.php', 1))
+	.'" data-self="'.dol_escape_htmltag($selfbase.$listparam)
+	.'" data-confirm-delete="'.dol_escape_htmltag($langs->trans('ConvomailConfirmDelete'))
 	// New-mail checks (ajax/poll.php): every CONVOMAIL_POLL_INTERVAL seconds while the page is visible, 0 = off
-	.' data-poll-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/poll.php', 1)).'"'
-	.' data-poll-interval="'.convomail_poll_interval().'"'
-	.' data-maxuid="'.(($list !== false && isset($list['maxuid'])) ? (int) $list['maxuid'] : -1).'"'
-	.' data-page="'.((int) $page).'" data-searching="'.($search !== '' ? 1 : 0).'"'
-	.' data-folder-url="'.dol_escape_htmltag($selfbase).'"'
-	.' data-poll-texts="'.dol_escape_htmltag(ConvomailView::pollTexts()).'"'
+	.'" data-poll-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/poll.php', 1))
+	.'" data-poll-interval="'.convomail_poll_interval()
+	.'" data-maxuid="'.(($list !== false && isset($list['maxuid'])) ? (int) $list['maxuid'] : -1)
+	.'" data-page="'.((int) $page).'" data-searching="'.($search !== '' ? 1 : 0)
+	.'" data-folder-url="'.dol_escape_htmltag($selfbase)
+	.'" data-poll-texts="'.dol_escape_htmltag(ConvomailView::pollTexts()).'"'
 	// Folder management (ajax/folder.php): only for whoever manages the account
-	.($canmanagefolders ? ' data-ajax-folder="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/folder.php', 1)).'"'
-		.' data-new-folder-prompt="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailNewFolderPrompt')).'"'
-		.' data-confirm-delete-folder="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailConfirmDeleteFolder')).'"' : '')
+	.($canmanagefolders ? ' data-ajax-folder="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/folder.php', 1))
+		.'" data-new-folder-prompt="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailNewFolderPrompt'))
+		.'" data-confirm-delete-folder="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailConfirmDeleteFolder')).'"' : '')
 	.'>';
 
 // Left: account, compose, folders

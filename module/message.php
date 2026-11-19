@@ -16,7 +16,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -30,9 +30,15 @@ if (!$res) {
 }
 
 /**
- * @var Translate $langs
+ * @var DoliDB $db
  * @var HookManager $hookmanager
+ * @var Translate $langs
+ * @var User $user
  */
+'@phan-var-force DoliDB $db';
+'@phan-var-force HookManager $hookmanager';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
 dol_include_once('/convomail/class/convomailview.class.php');
@@ -108,7 +114,6 @@ if ($action == 'confirm_thirdparty') {
 		$contact->lastname = GETPOST('lastname', 'alphanohtml');
 		$contact->firstname = GETPOST('firstname', 'alphanohtml');
 		$contact->email = $addr;
-		$contact->statut = 1;
 		$contact->priv = 0;
 		if ($contact->lastname === '') {
 			$contact->lastname = $addr;

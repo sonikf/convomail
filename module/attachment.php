@@ -26,7 +26,7 @@ if (!defined('NOREQUIREAJAX')) {
 }
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -38,6 +38,13 @@ if (!$res && file_exists("../../../main.inc.php")) {
 if (!$res) {
 	die("Include of main fails");
 }
+
+/**
+ * @var DoliDB $db
+ * @var User $user
+ */
+'@phan-var-force DoliDB $db';
+'@phan-var-force User $user';
 
 dol_include_once('/convomail/class/hordemailboxclient.class.php');
 dol_include_once('/convomail/lib/convomail.lib.php');

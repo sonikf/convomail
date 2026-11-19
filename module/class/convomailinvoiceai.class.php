@@ -140,9 +140,9 @@ class ConvomailInvoiceAi
 	 * dropped or does not add up. A PrivacyGuard placeholder that survived unmasking is a
 	 * problem, never a value.
 	 *
-	 * @param  string|array $raw         Answer of Ai::generateContent
+	 * @param  string|array<mixed> $raw         Answer of Ai::generateContent
 	 * @param  string       $countrycode ISO country code (or llx_c_country rowid) whose VAT rates apply
-	 * @return array{ok:bool,values:array,problems:array<int,array{code:string,args:array}>}
+	 * @return array{ok:bool,values:array<string,mixed>,problems:array<int,array{code:string,args:array<int,mixed>}>}
 	 */
 	public function validate($raw, $countrycode)
 	{
@@ -333,8 +333,8 @@ class ConvomailInvoiceAi
 	 *
 	 * Works on validate() values and on ConvomailEInvoice::parse() hints alike.
 	 *
-	 * @param  array    $values Values with total_ht, total_vat, total_ttc and vatlines
-	 * @return array<int,array{code:string,args:array}> Problems
+	 * @param  array<string,mixed> $values Values with total_ht, total_vat, total_ttc and vatlines
+	 * @return array<int,array{code:string,args:array<int,mixed>}> Problems
 	 */
 	public static function checkAmounts(array $values)
 	{
@@ -379,9 +379,9 @@ class ConvomailInvoiceAi
 	/**
 	 * Check that each VAT rate exists in llx_c_tva for the country
 	 *
-	 * @param  array      $vatlines    Lines with a 'rate'
+	 * @param  array<mixed> $vatlines Lines with a 'rate'
 	 * @param  string|int $countrycode ISO country code or llx_c_country rowid
-	 * @return array<int,array{code:string,args:array}> Problems
+	 * @return array<int,array{code:string,args:array<int,mixed>}> Problems
 	 */
 	public function checkRates(array $vatlines, $countrycode)
 	{
@@ -463,7 +463,7 @@ class ConvomailInvoiceAi
 	/**
 	 * @param  string     $code    Translation code
 	 * @param  string|int ...$args Field names or line numbers, never values read from a document
-	 * @return array{code:string,args:array}
+	 * @return array{code:string,args:array<int,mixed>}
 	 */
 	public static function problem($code, ...$args)
 	{

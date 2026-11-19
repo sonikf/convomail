@@ -183,12 +183,12 @@ class ConvomailProjectResolver
 		if (empty($msgids)) {
 			return $map;
 		}
-		$in = array();
+		$sqlin = array();
 		foreach ($msgids as $id) {
-			$in[] = "'".$this->db->escape($id)."'";
+			$sqlin[] = "'".$this->db->escape($id)."'";
 		}
 		$sql = "SELECT a.id, a.email_msgid, a.fk_project, a.fk_soc FROM ".MAIN_DB_PREFIX."actioncomm as a";
-		$sql .= " WHERE a.email_msgid IN (".implode(',', $in).")";
+		$sql .= " WHERE a.email_msgid IN (".implode(',', $sqlin).")";
 		$sql .= " AND a.code IN ('AC_EMAIL', 'AC_EMAIL_IN')";
 		$sql .= " AND a.entity IN (".getEntity('agenda').")";
 		$sql .= " ORDER BY a.id ASC";

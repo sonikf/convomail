@@ -18,7 +18,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -30,6 +30,17 @@ if (!$res && file_exists("../../../main.inc.php")) {
 if (!$res) {
 	die("Include of main fails");
 }
+
+/**
+ * @var Conf $conf
+ * @var DoliDB $db
+ * @var Translate $langs
+ * @var User $user
+ */
+'@phan-var-force Conf $conf';
+'@phan-var-force DoliDB $db';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 dol_include_once('/convomail/class/convomailaccount.class.php');
@@ -185,8 +196,8 @@ if ($action == 'create' || ($action == 'edit' && $account->id > 0)) {
 	print '<tr><td>'.$langs->trans('ConvomailAuthType').'</td><td>';
 	if ($account->isOAuth()) {
 		$st = (new ConvomailOAuth($db))->status($account);
-		$code = ConvomailOAuth::providerOfApp($account->oauth_app);
-		print dol_escape_htmltag(ConvomailOAuth::providers()[$code]['label'] ?? $account->oauth_app).' · ';
+		$code = ConvomailOAuth::providerOfApp((string) $account->oauth_app);
+		print dol_escape_htmltag(ConvomailOAuth::providers()[$code]['label'] ?? (string) $account->oauth_app).' · ';
 		print dolGetStatus($langs->trans($st['connected'] ? 'ConvomailOAuthStatusOk' : 'ConvomailOAuthStatusNone'), '', '', $st['connected'] ? 'status4' : 'status8', 2);
 		print ' <a class="button smallpaddingimp" href="'.dol_escape_htmltag(dol_buildpath('/convomail/oauth.php', 1).'?action=connect&accountid='.$account->id.'&token='.newToken()).'">'.$langs->trans($st['connected'] ? 'ConvomailOAuthReconnectButton' : 'ConvomailOAuthConnectButton', ConvomailOAuth::providers()[$code]['label'] ?? '').'</a>';
 	} else {
@@ -229,7 +240,7 @@ if ($action == 'create' || ($action == 'edit' && $account->id > 0)) {
 	print '<tr class="oddeven"><td colspan="3">';
 	print '<form method="POST" action="'.dol_escape_htmltag($cardurl).'">';
 	print '<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="grant">';
-	print $form->select_dolusers('', 'userid', 1, array_keys(is_array($access) ? $access : array()), 0, '', '', 0, 0, 0, '', 0, '', 'minwidth200', 1);
+	print $form->select_dolusers('', 'userid', 1, array_keys(is_array($access) ? $access : array()), 0, '', '', '0', 0, 0, '', 0, '', 'minwidth200', 1);
 	print ' <select name="cansend" class="flat"><option value="0">'.dol_escape_htmltag($langs->trans('ConvomailAccessRead')).'</option><option value="1">'.dol_escape_htmltag($langs->trans('ConvomailAccessSend')).'</option></select>';
 	print ' <button type="submit" class="button smallpaddingimp">'.$langs->trans('ConvomailAccessAdd').'</button>';
 	print '</form></td></tr>';
@@ -283,8 +294,8 @@ if ($action == 'create' || ($action == 'edit' && $account->id > 0)) {
 		}
 		if ($acc->isOAuth()) {
 			$st = (new ConvomailOAuth($db))->status($acc);
-			$code = ConvomailOAuth::providerOfApp($acc->oauth_app);
-			print '<td>'.dol_escape_htmltag(ConvomailOAuth::providers()[$code]['label'] ?? $acc->oauth_app).' '.dolGetStatus($langs->trans($st['connected'] ? 'ConvomailOAuthStatusOk' : 'ConvomailOAuthStatusNone'), '', '', $st['connected'] ? 'status4' : 'status8', 2).'</td>';
+			$code = ConvomailOAuth::providerOfApp((string) $acc->oauth_app);
+			print '<td>'.dol_escape_htmltag(ConvomailOAuth::providers()[$code]['label'] ?? (string) $acc->oauth_app).' '.dolGetStatus($langs->trans($st['connected'] ? 'ConvomailOAuthStatusOk' : 'ConvomailOAuthStatusNone'), '', '', $st['connected'] ? 'status4' : 'status8', 2).'</td>';
 		} else {
 			print '<td>'.$langs->trans('Password').'</td>';
 		}
