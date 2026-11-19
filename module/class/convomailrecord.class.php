@@ -437,7 +437,7 @@ class ConvomailRecord
 			$h .= '<input type="hidden" name="subject" value="'.dol_escape_htmltag($v['subject']).'">';	// the label / private note
 		}
 		// The project the email belongs to, as a chip: removed here, changed on the card
-		if ($type !== 'project' && isModEnabled('project') && $v['projectid'] > 0 && ($p = $this->targets->fetchVisible('project', (int) $v['projectid'], $user))) {
+		if ($type !== 'project' && isModEnabled('project') && $v['projectid'] > 0 && ($p = $this->targets->fetchVisible('project', (int) $v['projectid'], $user)) instanceof Project) {
 			$chip = '<span class="cm-chip cm-chip-project"><input type="hidden" name="projectid" value="'.((int) $p->id).'">'.img_picto('', 'project', 'class="pictofixedwidth"').dol_escape_htmltag($p->ref.' '.dol_trunc($p->title, 40));
 			$chip .= ' <button type="button" class="cm-chip-x" data-cm-chip-remove="1" title="'.dol_escape_htmltag($langs->trans('ConvomailNoProject')).'">&times;</button></span>';
 			$h .= self::row($langs->trans('Project'), $chip);
@@ -796,6 +796,8 @@ class ConvomailRecord
 		if (!$object) {
 			return array('ok' => false, 'errors' => array($langs->trans($this->targets->error === 'ConvomailTargetNotAllowed' ? 'ConvomailCannotOpenRecord' : 'ConvomailTargetUnknown')));
 		}
+		// socid or fk_soc, depending on the record's class (neither is declared on CommonObject)
+		// @phan-suppress-next-line PhanUndeclaredProperty
 		$socid = (int) ($object->socid ?? ($object->fk_soc ?? 0));
 		$projectid = (int) ($object->fk_project ?? 0);
 		$label = '<a href="'.dol_escape_htmltag(ConvomailTargets::cardUrl($ttype, (int) $object->id)).'">'.dol_escape_htmltag(ConvomailTargets::label($ttype, $object)).'</a>';
@@ -932,6 +934,8 @@ class ConvomailRecord
 			$notes = self::filerNotes($filer);
 		}
 		if ($logit) {
+			// socid or fk_soc, depending on the record's class (neither is declared on CommonObject)
+			// @phan-suppress-next-line PhanUndeclaredProperty
 			$socid = ($type === 'societe') ? (int) $object->id : (int) ($object->socid ?? ($object->fk_soc ?? 0));
 			$matcher = new ConvomailMatcher($this->db);
 			$events = $matcher->loggedEvents(array($this->message['msgid']));

@@ -24,7 +24,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -38,8 +38,17 @@ if (!$res) {
 }
 
 /**
+ * @var Conf $conf
+ * @var DoliDB $db
  * @var HookManager $hookmanager
+ * @var Translate $langs
+ * @var User $user
  */
+'@phan-var-force Conf $conf';
+'@phan-var-force DoliDB $db';
+'@phan-var-force HookManager $hookmanager';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/core/class/doleditor.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
@@ -282,14 +291,16 @@ if ($action == '') {
 		}
 		$socid = $socid ?: (int) $replyevent->socid;
 		$projectid = $projectid ?: (int) $replyevent->fk_project;
-		if (empty($origin) && !empty($replyevent->elementtype) && !empty($replyevent->fk_element)) {
+		if (empty($origin) && !empty($replyevent->elementtype) && !empty($replyevent->elementid)) {
 			$origin = $replyevent->elementtype;
-			$originid = (int) $replyevent->fk_element;
+			$originid = (int) $replyevent->elementid;
 		}
 	} else {
 		if ($origin && $originid > 0) {
 			$originobject = fetchObjectByElement($originid, $origin);
 			if (is_object($originobject)) {
+				// socid or fk_soc, depending on the record's class (neither is declared on CommonObject)
+				// @phan-suppress-next-line PhanUndeclaredProperty
 				$socid = $socid ?: (int) (!empty($originobject->socid) ? $originobject->socid : ($originobject->fk_soc ?? 0));
 				$projectid = $projectid ?: (int) ($originobject->fk_project ?? 0);
 				if (empty($subject) && !empty($originobject->ref)) {
@@ -400,15 +411,16 @@ if ($action == 'send') {
 	// Attachments: move uploads to a per-send temp dir
 	$files = array();
 	$upload_dir_tmp = $conf->convomail->dir_temp.'/'.((int) $user->id).'-'.dol_print_date(dol_now(), 'dayhourlog').'-'.mt_rand(1000, 9999);
-	if (!$error && !empty($_FILES['attachments']['name']) && is_array($_FILES['attachments']['name'])) {
+	$upload = $_FILES['attachments'] ?? array();
+	if (!$error && !empty($upload['name']) && is_array($upload['name'])) {
 		dol_mkdir($upload_dir_tmp);
-		foreach ($_FILES['attachments']['name'] as $i => $name) {
-			if ($name === '' || !empty($_FILES['attachments']['error'][$i])) {
+		foreach ($upload['name'] as $i => $name) {
+			if ($name === '' || !empty($upload['error'][$i])) {
 				continue;
 			}
 			$safename = dol_sanitizeFileName($name);
 			$dest = $upload_dir_tmp.'/'.$safename;
-			$moved = dol_move_uploaded_file($_FILES['attachments']['tmp_name'][$i], $dest, 1, 0, $_FILES['attachments']['error'][$i]);
+			$moved = dol_move_uploaded_file($upload['tmp_name'][$i], $dest, 1, 0, $upload['error'][$i]);
 			if (is_numeric($moved) && $moved > 0) {	// Returns 1 or 2 on success, an error string otherwise
 				$files[] = array('path' => $dest, 'mime' => dol_mimetype($safename), 'name' => $safename);
 			} else {
@@ -630,8 +642,8 @@ print $form->selectarray('accountid', $accountoptions, $accountid ?: $defaultacc
 print '</td></tr>';
 
 // Address suggestions while typing (ajax/addresses.php, js/convomail-compose.js)
-$acattr = ' autocomplete="off" spellcheck="false" data-cm-addresses="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/addresses.php', 1)).'"'
-	.' data-cm-kinds="'.dol_escape_htmltag(json_encode(array('contact' => $langs->transnoentitiesnoconv('Contact'), 'thirdparty' => $langs->transnoentitiesnoconv('ThirdParty'), 'user' => $langs->transnoentitiesnoconv('User'), 'recent' => $langs->transnoentitiesnoconv('ConvomailRecentAddress')))).'"';
+$acattr = ' autocomplete="off" spellcheck="false" data-cm-addresses="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/addresses.php', 1))
+	.'" data-cm-kinds="'.dol_escape_htmltag(json_encode(array('contact' => $langs->transnoentitiesnoconv('Contact'), 'thirdparty' => $langs->transnoentitiesnoconv('ThirdParty'), 'user' => $langs->transnoentitiesnoconv('User'), 'recent' => $langs->transnoentitiesnoconv('ConvomailRecentAddress')))).'"';
 print '<tr><td class="fieldrequired">'.$langs->trans('MailTo').'</td><td><input type="text" name="sendto" class="quatrevingtpercent" value="'.dol_escape_htmltag($sendto).'"'.$acattr.'>';
 print '<div class="cm-chips" id="cm-projectcontacts" data-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/projectcontacts.php', 1)).'" data-cc-label="'.dol_escape_htmltag($langs->trans('MailCC')).'" title="'.dol_escape_htmltag($langs->trans('ConvomailProjectContactsHelp')).'">';
 if ($projectid > 0) {

@@ -115,7 +115,7 @@ class ConvomailTransport
 			return -1;
 		}
 
-		$from = $account->label ? '"'.str_replace('"', '', $account->label).'" <'.$account->email.'>' : '<'.$account->email.'>';
+		$fromaddress = $account->label ? '"'.str_replace('"', '', $account->label).'" <'.$account->email.'>' : '<'.$account->email.'>';
 
 		$filepaths = array();
 		$mimetypes = array();
@@ -152,7 +152,7 @@ class ConvomailTransport
 			$mailfile = new CMailFile(
 				(string) $msg['subject'],
 				(string) $msg['to'],
-				$from,
+				$fromaddress,
 				$body,
 				$filepaths,
 				$mimetypes,
@@ -183,11 +183,11 @@ class ConvomailTransport
 			$result = $mailfile->sendfile();
 
 			// @phan-suppress-next-line PhanUndeclaredProperty
-			if ($result && isset($mailfile->message) && is_object($mailfile->message) && method_exists($mailfile->message, 'toString')) {
+			if ($result && $mailfile->message instanceof Swift_Message) {
 				// Swift Mailer gives the message a new Message-ID right after sending it.
 				// Put back the one that was delivered so the Sent copy threads with the replies.
 				$idheader = $mailfile->message->getHeaders()->get('Message-ID');
-				if ($idheader && !empty($mailfile->msgid)) {
+				if ($idheader instanceof Swift_Mime_Headers_IdentificationHeader && !empty($mailfile->msgid)) {
 					$idheader->setId(trim((string) $mailfile->msgid, " <>"));
 				}
 				// The sender reading their own Sent copy must not count as an open: take the tracking image out
@@ -197,17 +197,17 @@ class ConvomailTransport
 				}
 				$rawmime = $mailfile->message->toString();
 			}
+
+			if (!$result) {
+				$this->error = $mailfile->error ? $mailfile->error : $langs->trans('ErrorFailedToSendMail', $account->email, $msg['to']);
+				$this->errors = $mailfile->errors;
+				return -1;
+			}
+
+			$this->msgid = trim((string) $mailfile->msgid, " <>");
 		} finally {
 			$this->restoreSmtpSettings($saved);
 		}
-
-		if (!$result) {
-			$this->error = $mailfile->error ? $mailfile->error : $langs->trans('ErrorFailedToSendMail', $account->email, $msg['to']);
-			$this->errors = $mailfile->errors;
-			return -1;
-		}
-
-		$this->msgid = trim((string) $mailfile->msgid, " <>");
 
 		$this->copyToSent($account, $rawmime);
 
@@ -224,7 +224,7 @@ class ConvomailTransport
 	private function dedupePastedImages($mailfile)
 	{
 		// @phan-suppress-next-line PhanUndeclaredProperty
-		if (empty($mailfile->html_images) || !isset($mailfile->message) || !($mailfile->message instanceof Swift_Message)) {
+		if (empty($mailfile->html_images) || !($mailfile->message instanceof Swift_Message)) {
 			return;
 		}
 		$pasted = array();
@@ -239,7 +239,7 @@ class ConvomailTransport
 		$kept = array();
 		$embedded = array();
 		foreach ($mailfile->message->getChildren() as $child) {
-			$name = method_exists($child, 'getFilename') ? (string) $child->getFilename() : '';
+			$name = $child instanceof Swift_Mime_Attachment ? (string) $child->getFilename() : '';
 			if ($child instanceof Swift_EmbeddedFile && isset($pasted[$name])) {
 				if (isset($embedded[$name])) {
 					continue;	// second embedded copy, not referenced by the HTML

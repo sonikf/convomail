@@ -182,9 +182,9 @@ class ConvomailCombined
 		$queues = array();
 		foreach ($lists as $id => $uids) {
 			if ($newer) {
-				$from = $after[$id] ?? null;	// none: nothing newer from this mailbox
-				$q = array_reverse(array_values(array_filter($uids, function ($uid) use ($from, $pos, $id) {
-					return $from !== null && $pos[$id][$uid] >= $from;
+				$frompos = $after[$id] ?? null;	// none: nothing newer from this mailbox
+				$q = array_reverse(array_values(array_filter($uids, function ($uid) use ($frompos, $pos, $id) {
+					return $frompos !== null && $pos[$id][$uid] >= $frompos;
 				})));
 			} else {
 				$below = $before[$id] ?? null;	// none: from its newest

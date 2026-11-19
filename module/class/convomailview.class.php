@@ -110,9 +110,9 @@ class ConvomailView
 	public static function correspondent(array $message, array $myemails)
 	{
 		// A form or no-reply sender with the visitor in Reply-To: the person is the visitor
-		$from = ConvomailMatcher::senders($message)[0] ?? null;
-		if ($from && !in_array(strtolower($from['email']), $myemails, true)) {
-			return $from;
+		$sender = ConvomailMatcher::senders($message)[0] ?? null;
+		if ($sender && !in_array(strtolower($sender['email']), $myemails, true)) {
+			return $sender;
 		}
 		foreach (array_merge($message['to'] ?? array(), $message['cc'] ?? array()) as $a) {
 			if (!in_array(strtolower($a['email']), $myemails, true)) {
@@ -519,6 +519,7 @@ class ConvomailView
 	{
 		/** @var Translate $langs */
 		global $db, $user, $langs;
+		'@phan-var-force User $user';
 
 		$langs->loadLangs(array('convomail@convomail', 'mails', 'companies', 'projects'));
 		$showimages = !empty($opts['showimages']);

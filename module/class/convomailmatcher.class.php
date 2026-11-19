@@ -259,12 +259,12 @@ class ConvomailMatcher
 		if (empty($msgids)) {
 			return $map;
 		}
-		$in = array();
+		$sqlin = array();
 		foreach ($msgids as $msgid) {
-			$in[] = "'".$this->db->escape($msgid)."'";
+			$sqlin[] = "'".$this->db->escape($msgid)."'";
 		}
 		$sql = "SELECT a.id, a.email_msgid FROM ".MAIN_DB_PREFIX."actioncomm as a";
-		$sql .= " WHERE a.email_msgid IN (".implode(',', $in).")";
+		$sql .= " WHERE a.email_msgid IN (".implode(',', $sqlin).")";
 		$sql .= " AND a.code IN ('AC_EMAIL', 'AC_EMAIL_IN')";
 		$sql .= " AND a.entity IN (".getEntity('agenda').")";
 		$resql = $this->db->query($sql);
@@ -291,14 +291,14 @@ class ConvomailMatcher
 			return $result;
 		}
 
-		$in = array();
+		$sqlin = array();
 		foreach ($emails as $email) {
-			$in[] = "'".$this->db->escape($email)."'";
+			$sqlin[] = "'".$this->db->escape($email)."'";
 		}
-		$inlist = implode(',', $in);
+		$sqlinlist = implode(',', $sqlin);
 
 		$sql = "SELECT sp.rowid, sp.fk_soc FROM ".MAIN_DB_PREFIX."socpeople as sp";
-		$sql .= " WHERE LOWER(sp.email) IN (".$inlist.")";
+		$sql .= " WHERE LOWER(sp.email) IN (".$sqlinlist.")";
 		$sql .= " AND sp.statut = 1";
 		$sql .= " AND sp.entity IN (".getEntity('contact').")";
 		$resql = $this->db->query($sql);
@@ -313,7 +313,7 @@ class ConvomailMatcher
 		}
 
 		$sql = "SELECT s.rowid, LOWER(s.email) as email FROM ".MAIN_DB_PREFIX."societe as s";
-		$sql .= " WHERE LOWER(s.email) IN (".$inlist.")";
+		$sql .= " WHERE LOWER(s.email) IN (".$sqlinlist.")";
 		$sql .= " AND s.status = 1";
 		$sql .= " AND s.entity IN (".getEntity('societe').")";
 		$resql = $this->db->query($sql);
@@ -340,13 +340,13 @@ class ConvomailMatcher
 	 */
 	public static function replyToOthers(array $message)
 	{
-		$from = array();
+		$fromemails = array();
 		foreach ($message['from'] ?? array() as $a) {
-			$from[] = strtolower($a['email']);
+			$fromemails[] = strtolower($a['email']);
 		}
 		$out = array();
 		foreach ($message['reply_to'] ?? array() as $a) {
-			if ($a['email'] !== '' && !in_array(strtolower($a['email']), $from, true)) {
+			if ($a['email'] !== '' && !in_array(strtolower($a['email']), $fromemails, true)) {
 				$out[] = $a;
 			}
 		}
@@ -443,11 +443,11 @@ class ConvomailMatcher
 		if ($domain === '' || self::isFreeMailDomain($domain) || !$user->hasRight('societe', 'lire')) {
 			return null;
 		}
-		$d = $this->db->escape($this->db->escapeforlike($domain));
+		$sqldomain = $this->db->escape($this->db->escapeforlike($domain));
 		$sql = "SELECT s.rowid, s.nom FROM ".MAIN_DB_PREFIX."societe as s";
 		$sql .= " WHERE s.entity IN (".getEntity('societe').") AND s.status = 1";
-		$sql .= " AND (LOWER(s.email) LIKE '%@".$d."' OR LOWER(s.url) LIKE '%//".$d."%' OR LOWER(s.url) LIKE '%.".$d."%' OR LOWER(s.url) LIKE '".$d."%'";
-		$sql .= " OR EXISTS (SELECT 1 FROM ".MAIN_DB_PREFIX."socpeople as sp WHERE sp.fk_soc = s.rowid AND LOWER(sp.email) LIKE '%@".$d."'))";
+		$sql .= " AND (LOWER(s.email) LIKE '%@".$sqldomain."' OR LOWER(s.url) LIKE '%//".$sqldomain."%' OR LOWER(s.url) LIKE '%.".$sqldomain."%' OR LOWER(s.url) LIKE '".$sqldomain."%'";
+		$sql .= " OR EXISTS (SELECT 1 FROM ".MAIN_DB_PREFIX."socpeople as sp WHERE sp.fk_soc = s.rowid AND LOWER(sp.email) LIKE '%@".$sqldomain."'))";
 		if (!empty($user->socid)) {
 			$sql .= " AND s.rowid = ".((int) $user->socid);
 		} elseif (!$user->hasRight('societe', 'client', 'voir')) {

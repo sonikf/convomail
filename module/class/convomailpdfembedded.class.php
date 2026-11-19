@@ -111,9 +111,7 @@ class ConvomailPdfEmbedded
 			if (method_exists($config, 'setRetainImageContent')) {
 				$config->setRetainImageContent(false);
 			}
-			if (method_exists($config, 'setIgnoreEncryption')) {
-				$config->setIgnoreEncryption(false);
-			}
+			// Encrypted PDFs stay refused: smalot's default (setIgnoreEncryption() is deprecated)
 			$parser = new \Smalot\PdfParser\Parser(array(), $config);
 			$document = $parser->parseContent($pdfbytes);
 			unset($pdfbytes);
@@ -199,7 +197,8 @@ class ConvomailPdfEmbedded
 		// Only inline dictionaries and arrays: references are objects of their own, visited by findXml()
 		foreach ($header->getElementTypes() as $name => $class) {
 			if ($class === 'Smalot\PdfParser\Header') {
-				$found = self::searchHeader($header->get((string) $name), $depth + 1);
+				$element = $header->get((string) $name);
+				$found = $element instanceof \Smalot\PdfParser\Header ? self::searchHeader($element, $depth + 1) : null;
 			} elseif ($class === 'Smalot\PdfParser\Element\ElementArray') {
 				$found = null;
 				$element = $header->get((string) $name);

@@ -65,7 +65,7 @@ class ConvomailInvoiceReader
 	 * @param  string                                                         $countrycode ISO code whose VAT rates apply when the e-invoice names no seller country ('' to skip)
 	 * @param  int                                                            $maxpages    PDF pages to read for the text
 	 * @param  int                                                            $maxchars    Characters of PDF text at most
-	 * @return array{source:string,filename:string,embedded:string,hints:?array,text:string,problems:array<int,array{code:string,args:array}>}
+	 * @return array{source:string,filename:string,embedded:string,hints:?array<string,mixed>,text:string,problems:array<int,array{code:string,args:array<int,mixed>}>}
 	 */
 	public function read(array $attachments, $countrycode = '', $maxpages = 3, $maxchars = 20000)
 	{
@@ -138,7 +138,7 @@ class ConvomailInvoiceReader
 	 *
 	 * @param  string $text        PDF text (read()'s 'text')
 	 * @param  string $countrycode ISO code whose VAT rates apply
-	 * @return array{ok:bool,hints:?array,problems:array<int,array{code:string,args:array}>,masked:bool}
+	 * @return array{ok:bool,hints:?array<string,mixed>,problems:array<int,array{code:string,args:array<int,mixed>}>,masked:bool}
 	 */
 	public function readWithAi($text, $countrycode)
 	{
@@ -261,7 +261,7 @@ class ConvomailInvoiceReader
 	/**
 	 * Text of a problem, in the user's language
 	 *
-	 * @param  array{code:string,args:array} $problem Problem of read() or ConvomailInvoiceAi::validate()
+	 * @param  array{code:string,args:array<int,mixed>} $problem Problem of read() or ConvomailInvoiceAi::validate()
 	 * @param  Translate                      $langs   Languages
 	 * @return string                                  Plain text: escape it for HTML
 	 */
@@ -274,13 +274,13 @@ class ConvomailInvoiceReader
 	}
 
 	/**
-	 * @param  array  $result      Result being built
+	 * @param  array<string,mixed> $result Result being built
 	 * @param  string $source      'xml' or 'facturx'
 	 * @param  string $filename    Attachment name
 	 * @param  string $embedded    Embedded file name
-	 * @param  array  $hints       ConvomailEInvoice::parse() hints
+	 * @param  array<string,mixed> $hints ConvomailEInvoice::parse() hints
 	 * @param  string $countrycode ISO country code, '' to skip the VAT rate check
-	 * @return array
+	 * @return array<string,mixed>
 	 */
 	private function withHints(array $result, $source, $filename, $embedded, array $hints, $countrycode)
 	{

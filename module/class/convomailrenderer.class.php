@@ -203,11 +203,8 @@ class ConvomailRenderer
 		$imgsrc = "data: ".$origin.($allowImages ? ' https: http:' : '');
 		$csp = "default-src 'none'; style-src 'unsafe-inline'; img-src ".$imgsrc."; font-src data:";
 
-		return '<!DOCTYPE html><html><head><meta charset="utf-8">'
-			.'<meta http-equiv="Content-Security-Policy" content="'.htmlspecialchars($csp, ENT_QUOTES).'">'
-			.'<base target="_blank">'
-			.'<style>body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45;margin:8px;color:#222;word-wrap:break-word}img{max-width:100%;height:auto}blockquote{margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex}</style>'
-			.'</head><body>'.$body.'</body></html>';
+		return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="'.htmlspecialchars($csp, ENT_QUOTES)
+			.'"><base target="_blank"><style>body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45;margin:8px;color:#222;word-wrap:break-word}img{max-width:100%;height:auto}blockquote{margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex}</style></head><body>'.$body.'</body></html>';
 	}
 
 	/**

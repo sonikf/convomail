@@ -32,7 +32,7 @@ if (!defined('NOREQUIREAJAX')) {
 }
 
 $res = 0;
-if (!$res && file_exists("../../main.inc.php")) {
+if (file_exists("../../main.inc.php")) {
 	$res = @include "../../main.inc.php";
 }
 if (!$res && file_exists("../../../main.inc.php")) {
@@ -46,23 +46,18 @@ if (!$res) {
 	exit;
 }
 
+/**
+ * @var DoliDB $db
+ * @var Translate $langs
+ * @var User $user
+ */
+'@phan-var-force DoliDB $db';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
+
 dol_include_once('/convomail/class/convomailview.class.php');
 dol_include_once('/convomail/class/convomailcombined.class.php');
-
-/**
- * @param  array<string,mixed> $data Response
- * @param  int                 $code HTTP status
- * @return never
- */
-function convomail_json($data, $code = 200)
-{
-	global $db;
-	http_response_code($code);
-	top_httphead('application/json');
-	print json_encode($data);
-	$db->close();
-	exit;
-}
+dol_include_once('/convomail/lib/convomail.lib.php');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 	convomail_json(array('ok' => false, 'error' => 'POST only'), 405);

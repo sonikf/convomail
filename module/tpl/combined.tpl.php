@@ -39,6 +39,11 @@ if (empty($conf) || !is_object($conf)) {
  * @var User $user
  * @var int $limit
  */
+'@phan-var-force Conf $conf';
+'@phan-var-force DoliDB $db';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
+'@phan-var-force int $limit';
 
 $folder      = ConvomailCombined::FOLDER;
 $before      = ConvomailCombined::parseCursor(GETPOST('before', 'alphanohtml'));
@@ -166,26 +171,26 @@ foreach (is_array($myaccounts) ? $myaccounts : array() as $acc) {
 
 llxHeader(convomail_assets(array('/convomail/css/convomail.css'), array('/convomail/js/convomail.js')), $langs->trans('ConvomailCombinedTitle'), '', '', 0, 0, '', '', '', 'mod-convomail page-mailbox page-combined');
 
-print '<div class="cm-app" data-view="combined" data-accountid="" data-folder="'.dol_escape_htmltag($folder).'" data-token="'.newToken().'"'
-	.' data-ajax-message="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/message.php', 1)).'"'
-	.' data-ajax-action="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/action.php', 1)).'"'
-	.' data-ajax-folder="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/folder.php', 1)).'"'
-	.' data-ajax-combined="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/combined.php', 1)).'"'
-	.' data-page-message="'.dol_escape_htmltag(dol_buildpath('/convomail/message.php', 1)).'"'
-	.' data-self="'.dol_escape_htmltag($base.$listparam).'"'
-	.' data-confirm-delete="'.dol_escape_htmltag($langs->trans('ConvomailConfirmDelete')).'"'
-	.' data-new-folder-prompt="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailNewFolderPrompt')).'"'
-	.' data-other-mailbox="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailCombinedOtherMailbox', '%s')).'"'
-	.' data-markall-confirm="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailCombinedMarkConfirm')).'"'
+print '<div class="cm-app" data-view="combined" data-accountid="" data-folder="'.dol_escape_htmltag($folder).'" data-token="'.newToken()
+	.'" data-ajax-message="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/message.php', 1))
+	.'" data-ajax-action="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/action.php', 1))
+	.'" data-ajax-folder="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/folder.php', 1))
+	.'" data-ajax-combined="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/combined.php', 1))
+	.'" data-page-message="'.dol_escape_htmltag(dol_buildpath('/convomail/message.php', 1))
+	.'" data-self="'.dol_escape_htmltag($base.$listparam)
+	.'" data-confirm-delete="'.dol_escape_htmltag($langs->trans('ConvomailConfirmDelete'))
+	.'" data-new-folder-prompt="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailNewFolderPrompt'))
+	.'" data-other-mailbox="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailCombinedOtherMailbox', '%s'))
+	.'" data-markall-confirm="'.dol_escape_htmltag($langs->transnoentitiesnoconv('ConvomailCombinedMarkConfirm'))
 	// New-mail checks of every mailbox (ajax/poll.php?view=combined)
-	.' data-poll-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/poll.php', 1)).'"'
-	.' data-poll-interval="'.convomail_poll_interval().'"'
-	.' data-maxuids="'.dol_escape_htmltag(json_encode((object) ($search === '' ? $maxuids : array_fill_keys(array_keys($maxuids), -1)))).'"'
-	.' data-markuids="'.dol_escape_htmltag(json_encode((object) $maxuids)).'"'
-	.' data-page="'.($pos > 0 || !empty($before) ? 1 : 0).'" data-searching="'.($search !== '' ? 1 : 0).'"'
-	.' data-folder-url="'.dol_escape_htmltag($base).'"'
-	.' data-poll-texts="'.dol_escape_htmltag(ConvomailView::pollTexts()).'"'
-	.'>';
+	.'" data-poll-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/poll.php', 1))
+	.'" data-poll-interval="'.convomail_poll_interval()
+	.'" data-maxuids="'.dol_escape_htmltag(json_encode((object) ($search === '' ? $maxuids : array_fill_keys(array_keys($maxuids), -1))))
+	.'" data-markuids="'.dol_escape_htmltag(json_encode((object) $maxuids))
+	.'" data-page="'.($pos > 0 || !empty($before) ? 1 : 0).'" data-searching="'.($search !== '' ? 1 : 0)
+	.'" data-folder-url="'.dol_escape_htmltag($base)
+	.'" data-poll-texts="'.dol_escape_htmltag(ConvomailView::pollTexts())
+	.'">';
 
 // Left: mailbox picker, compose, and per mailbox its main folders (drop targets) with the Inbox count
 $icons = array('inbox' => 'fa-inbox', 'archive' => 'fa-archive', 'junk' => 'fa-ban', 'trash' => 'fa-trash');

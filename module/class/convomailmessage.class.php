@@ -23,6 +23,7 @@ class ConvomailMessage extends CommonObject
 	public $module = 'convomail';
 	public $element = 'convomailmessage';
 	public $table_element = 'convomail_message';
+	/** @var string Picto */
 	public $picto = 'email';
 	public $ismultientitymanaged = 1;
 	public $isextrafieldmanaged = 0;
@@ -31,7 +32,8 @@ class ConvomailMessage extends CommonObject
 	const DIRECTION_IN = 2;
 
 	/**
-	 * @var array<string,array<string,mixed>> Field definitions used by the *Common() methods
+	 * @inheritdoc
+	 * Field definitions used by the *Common() methods
 	 */
 	public $fields = array(
 		'rowid'         => array('type' => 'integer', 'label' => 'TechnicalID', 'enabled' => 1, 'visible' => 0, 'notnull' => 1, 'position' => 1),
@@ -56,20 +58,33 @@ class ConvomailMessage extends CommonObject
 		'import_key'    => array('type' => 'varchar(14)', 'label' => 'ImportId', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 1000),
 	);
 
+	/** @var int ID */
 	public $rowid;
 	public $entity;
 	public $fk_account;
+	/** @var string Folder */
 	public $folder;
+	/** @var int IMAP UID */
 	public $uid;
+	/** @var string Message-ID */
 	public $msgid;
+	/** @var string In-Reply-To */
 	public $in_reply_to;
+	/** @var int DIRECTION_OUT or DIRECTION_IN */
 	public $direction;
+	/** @var int Agenda event */
 	public $fk_actioncomm;
+	/** @var int|string Date of the message */
 	public $date_message;
+	/** @var int 1 when a read receipt was asked */
 	public $read_receipt;
+	/** @var ?string Key of the open-tracking image */
 	public $track_key;
+	/** @var int Opens counted */
 	public $nb_open;
+	/** @var int|string First open */
 	public $date_first_open;
+	/** @var int|string Latest open */
 	public $date_last_open;
 	/** @var ?string JSON: opens by kind and the latest ones (ConvomailTracker::detail()) */
 	public $open_detail;
