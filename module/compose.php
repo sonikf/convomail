@@ -1,5 +1,6 @@
 <?php
 /* Copyright (C) 2026 DPG Supply
+ * Copyright (C) 2026 Nick Fragoulis
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -766,7 +767,10 @@ $formproject = new FormProjets($db);
 
 llxHeader(convomail_assets(array('/convomail/css/convomail.css'), array('/convomail/js/convomail-compose.js')), $langs->trans('ComposeEmail'), '', '', 0, 0, '', '', '', 'mod-convomail page-compose');
 
-print load_fiche_titre($replyevent ? $langs->trans('ConvomailReply') : $langs->trans('ComposeEmail'), '', 'email');
+// The title says what the page was opened for: a draft to finish, a new email from a template, a reply
+$titles = array('draft' => 'ConvomailEditDraft', 'template' => 'ConvomailFromTemplate', 'asnew' => 'ConvomailEditAsNew', 'reply' => 'ConvomailReply', 'replyall' => 'ConvomailReplyAll', 'forward' => 'ConvomailForward');
+$title = ($srcmessage && isset($titles[$mode])) ? $titles[$mode] : ($replyevent ? 'ConvomailReply' : 'ComposeEmail');
+print load_fiche_titre($langs->trans($title), '', 'email');
 
 if (empty($accounts)) {
 	print '<div class="warning">'.$langs->trans('ConvomailNoAccountYet').' ';
