@@ -1,8 +1,24 @@
-/* Copyright (C) 2026 DPG Supply - convomail compose
+/* Copyright (C) 2026 DPG Supply
+ * Copyright (C) 2026 Nick Fragoulis
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
  * Email templates (fill subject and body above the signature/quote), project contact chips (add to To / Cc),
  * address suggestions while typing in To / Cc / Bcc (jQuery UI autocomplete, as elsewhere in Dolibarr),
  * and the AI writing tools of core's AI module.
  */
+
 (function () {
 	'use strict';
 
@@ -812,6 +828,17 @@
 				data.set('cmajax', '1');
 				var buttons = box.querySelectorAll('button[name="cmsave"]');
 				buttons.forEach(function (b) { b.disabled = true; });
+				// Dolibarr's input feedback classes (theme input-feedback.css; nothing on older themes)
+				var feedback = function (state) {
+					btn.classList.remove('processing-feedback', 'success-feedback', 'fail-feedback');
+					if (state) {
+						btn.classList.add(state + '-feedback');
+						if (state !== 'processing') {
+							setTimeout(function () { btn.classList.remove(state + '-feedback'); }, 1500);
+						}
+					}
+				};
+				feedback('processing');
 				show([box.getAttribute('data-saving')], false);
 				fetch(form.getAttribute('action'), { method: 'POST', body: data, credentials: 'same-origin' })
 					.then(function (r) { return r.json(); })
@@ -825,8 +852,9 @@
 							addSavedTemplate(res.template);
 						}
 						show(res && res.ok ? res.messages : (res && res.errors && res.errors.length ? res.errors : ['?']), !(res && res.ok));
+						feedback(res && res.ok ? 'success' : 'fail');
 					})
-					.catch(function (e) { show([String(e)], true); })
+					.catch(function (e) { show([String(e)], true); feedback('fail'); })
 					.then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
 			});
 		});
