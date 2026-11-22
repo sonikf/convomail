@@ -2,7 +2,7 @@
 
 Convomail lets each Dolibarr user send email from inside Dolibarr through their own mailbox. Every message is logged on the agenda of the customer, contact and project it belongs to. Users stop leaving Dolibarr to write email in another client, and the conversation history stays where the sales work happens.
 
-**Status:** version 1.3.0. Send and log, a three-pane mailbox with folders, conversations and Spam / Not spam, a Combined Inbox of several mailboxes, unread emails from contacts in the top bar, email on projects, turning emails into Dolibarr records (file attachments, link to an existing document, create a proposal, order, invoice, supplier invoice or quote, ticket or project; a supplier invoice can be filled from its e-invoice data, or read by the AI when it has none), new mail that shows up by itself, read receipts and open tracking, AI writing tools, rich-text compose with signature, templates and employee recipient fields, sign-in with Google or Microsoft 365 (OAuth), shared mailboxes, and a phone layout. Tested on Dolibarr 23.0 and 20.0 with PHP 8.2 against GreenMail and Dovecot test servers, including OAuth sign-in against a local token check, and by the owner on a Dolibarr 24 test instance. Not yet tested against real Gmail or Microsoft 365 servers.
+**Status:** version 1.4.0. Send and log, a three-pane mailbox with folders, conversations and Spam / Not spam, a Combined Inbox of several mailboxes, unread emails from contacts in the top bar, email on projects, turning emails into Dolibarr records (file attachments, link to an existing document, create a proposal, order, invoice, supplier invoice or quote, ticket or project; a supplier invoice can be filled from its e-invoice data, or read by the AI when it has none), new mail that shows up by itself, read receipts and open tracking, AI writing tools, rich-text compose with signature, templates and employee recipient fields, sign-in with Google or Microsoft 365 (OAuth), shared mailboxes, and a phone layout. Tested on Dolibarr 23.0 and 20.0 with PHP 8.2 against GreenMail and Dovecot test servers, including OAuth sign-in against a local token check, and by the owner on a Dolibarr 24 test instance. Not yet tested against real Gmail or Microsoft 365 servers.
 
 ![Convomail mailbox](docs/mailbox.jpg)
 
@@ -88,6 +88,8 @@ Compose page ──> ConvomailTransport ──> user's SMTP server ──> recip
    - *Use and manage own mail accounts*
    - *Send email from Dolibarr*
    - *Manage the mail accounts of all users* (for admins who set accounts up for others)
+   - *Read the mailboxes of all users* (for supervisors or compliance; each read is logged as a Dolibarr security event)
+   - *Read the mailboxes of subordinates* (for managers; each read is logged the same way)
 
 Enabling the module activates the core "Send Email" event type and adds an index on `llx_actioncomm.email_msgid`.
 
@@ -421,6 +423,8 @@ Disabling the module removes menus and rights but keeps all data.
 Mail accounts, logged messages and settings are kept when you disable, re-enable or upgrade Convomail. Disabling only removes its menus and permission definitions; the users' permissions are restored when it is enabled again. Since 0.5.2, deploying new files is enough: Convomail upgrades its tables on the first page that uses them, even if you don't disable and re-enable it. Before 0.5.2, new files on old tables made accounts look missing ("no mail account yet") until the module was disabled and enabled again; no data was lost.
 
 Passwords of mail accounts are encrypted with the instance key in Dolibarr's `conf.php` (`$dolibarr_main_instance_unique_id`). If Dolibarr itself is reinstalled with a new `conf.php`, keep that value, or users must re-enter their mail passwords (OAuth accounts must reconnect).
+
+**From 1.3.0 to 1.4.0:** deploy the new zip. No new setting. Two new rights are added: *Read the mailboxes of all users* and *Read the mailboxes of subordinates*. Users who already hold *Manage the mail accounts of all users* receive the read-all right automatically on the first page load. Each read of another user's mailbox through these rights is logged as a Dolibarr security event, once per session per account. The uid column in `llx_convomail_message` becomes BIGINT (a silent no-op for fresh 1.3.0 installs; applied automatically for older ones). Greek (el_GR) translations are included.
 
 **From 1.2.2 to 1.3.0:** deploy the new zip. No database change. Compose shows **To user(s)**, **Copy to user(s)** and **Cached copy to user(s)** when *Suggest emails of employees* is on in Setup > Emails (as core's own mail form does). New setting **Assign picked users to the email's event**, off by default. People not in Dolibarr get **Add as contact…** next to **Create third party**.
 

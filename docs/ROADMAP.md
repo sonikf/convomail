@@ -6,7 +6,7 @@ The plan for the module and for proposing webmail to Dolibarr core. Update it wh
 
 Users leave Dolibarr to send email from another client, and the link between a conversation and its customer, contact and project is lost. Convomail keeps email in Dolibarr: each user's own mailbox, with every message that matters on the agenda.
 
-## Where it stands (1.3.0)
+## Where it stands (1.4.0)
 
 | Phase | Scope | Version |
 |---|---|---|
@@ -67,8 +67,14 @@ Users leave Dolibarr to send email from another client, and the link between a c
 | Compose | **To user(s)**, **Copy to user(s)** and **Cached copy to user(s)** when Setup > Emails suggests employees' emails, as in core's mail form: active employees only, listed on click (up to 50), typing narrows, other addresses refused; the users go out in To, Cc or Bcc. **Assign picked users to the email's event** (off by default) assigns the To and Cc users, never Bcc. With review fixes from sonikf (PR #2) | 1.3.0 |
 | From an email | **Add as contact…** next to **Create third party** for anyone not in Dolibarr: core's contact form, the third party picked there (or preset as before when one uses the sender's domain), so a personal address of someone at a known company can be added. One email per contact in core: UPSTREAM 19 | 1.3.0 |
 | Fixes | The top bar's unread icon lines up with core's icons | 1.3.0 |
+| Access | Two new rights: *Read the mailboxes of all users* (`19428204`) and *Read the mailboxes of subordinates* (`19428205`), split from the admin right. On upgrade, users holding the admin right get the read-all right automatically. Each read of another user's mailbox is logged as a Dolibarr security event (once per session per account; `CONVOMAIL_READ_OTHER`). `readAccess()` on `ConvomailAccount` returns the reason (`own`, `shared`, `all`, `hierarchy`, or `''`) | 1.4.0 |
+| Schema | `uid` column of `llx_convomail_message` is now BIGINT; IMAP UIDs are unsigned 32-bit integers, beyond the INT range. Applied by `update_1.3.0.sql` on the first request after upgrading | 1.4.0 |
+| Translation | Greek (el_GR) for `convomail.lang` and `invoicereader.lang` | 1.4.0 |
+| Hooks | Hook points for compose page actions (`compose.php`) and message page actions (`message.php`), so third-party modules can extend them | 1.4.0 |
+| Fixes | Account preset auto-ticks *Server saves sent mail itself* for me.com, icloud.com, yahoo.com and aol.com, as it already did for Gmail and Microsoft 365; antivirus check on outgoing attachments (before sending, not just when filing); account delete is wrapped in a transaction; Send Email event type is deactivated when Convomail is disabled, only if Convomail itself activated it | 1.4.0 |
+| Dev | `dev/check.sh`: the static analysis gate (phpcs, PHPStan, Phan) with Document Browser read for its classes; phpcs and PHPStan/Phan clean on current code | 1.4.0 |
 
-**Tested:** Dolibarr 23.0 (everything), 24.0 (by the owner, on their test instance, 1.0.9x and 1.1.91 test builds) and 20.0 (install, mailbox, compose, File / Create panels: `dev/compat/`), PHP 8.2, GreenMail, Chromium, light theme. The 0.17.0 and 0.18.0 features were also checked by the owner on their test instance (test builds 0.16.91–0.16.93, 0.17.90–0.17.92). See [Test debt](#test-debt).
+**Tested:** Dolibarr 23.0 (everything), 24.0 (by the owner, on their test instance, 1.0.9x, 1.1.91 and 1.3.9x test builds) and 20.0 (install, mailbox, compose, File / Create panels: `dev/compat/`), PHP 8.2, GreenMail, Chromium, light theme. The 0.17.0 and 0.18.0 features were also checked by the owner on their test instance (test builds 0.16.91–0.16.93, 0.17.90–0.17.92). See [Test debt](#test-debt).
 
 ## Next
 
