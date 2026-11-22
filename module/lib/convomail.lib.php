@@ -1,5 +1,6 @@
 <?php
 /* Copyright (C) 2026 DPG Supply
+ * Copyright (C) 2026 Nick Fragoulis
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,24 +25,29 @@
 /**
  * Tabs of the module setup page
  *
- * @return array<int,array<int,string>>
+ * @return array<int,array{0:string,1:string,2:string}>
  */
 function convomail_admin_prepare_head()
 {
+	/** @var Translate $langs */
+	/** @var Conf $conf */
 	global $langs, $conf;
 	$langs->load('convomail@convomail');
 
 	$h = 0;
 	$head = array();
 
-	$head[$h][0] = dol_buildpath('/convomail/admin/setup.php', 1);
-	$head[$h][1] = $langs->trans('Settings');
-	$head[$h][2] = 'settings';
-	$h++;
+	$tabs = array('settings' => 'Settings', 'tools' => 'ConvomailSetupTabTools', 'tracking' => 'ConvomailSetupTabTracking', 'oauth' => 'ConvomailSetupTabOAuth');
+	foreach ($tabs as $tab => $label) {
+		$head[$h][0] = dol_buildpath('/convomail/admin/setup.php', 1).($tab !== 'settings' ? '?tab='.$tab : '');
+		$head[$h][1] = $langs->trans($label);
+		$head[$h][2] = $tab;
+		$h++;
+	}
 
 	complete_head_from_modules($conf, $langs, null, $head, $h, 'convomail@convomail');
 
-	return $head;
+	return array_values($head);
 }
 
 /**
@@ -251,6 +257,60 @@ function convomail_page_size()
 function convomail_show_conversation()
 {
 	return !getDolUserInt('CONVOMAIL_HIDE_CONVERSATION');
+}
+
+/**
+ * Density of the message list rows, chosen in the list head (Display) and remembered for the user
+ *
+ * @return string compact (one line, no picture), normal (two lines with a small picture) or comfortable (three lines)
+ */
+function convomail_density()
+{
+	$density = getDolUserString('CONVOMAIL_DENSITY');
+	return in_array($density, array('compact', 'comfortable'), true) ? $density : 'normal';
+}
+
+/**
+ * Layout of the message list, chosen in the list head (Display) and remembered for the user
+ *
+ * @return string list (rows of two lines beside the reading pane) or table (columns, the reading pane under the list)
+ */
+function convomail_list_view()
+{
+	return getDolUserString('CONVOMAIL_VIEW') === 'table' ? 'table' : 'list';
+}
+
+/**
+ * Order of the message list, remembered for the user (Display menu, or a column heading of the table)
+ *
+ * @return string date_desc (newest first, the default), date_asc, from_asc, from_desc, subject_asc, subject_desc,
+ *                size_desc or size_asc
+ */
+function convomail_sort()
+{
+	$sort = getDolUserString('CONVOMAIL_SORT');
+	return in_array($sort, convomail_sorts(), true) ? $sort : 'date_desc';
+}
+
+/**
+ * Orders offered for the message list (the mailbox client also takes to_asc and to_desc, used in Sent and Drafts
+ * where the rows show the recipient)
+ *
+ * @return string[]
+ */
+function convomail_sorts()
+{
+	return array('date_desc', 'date_asc', 'from_asc', 'from_desc', 'subject_asc', 'subject_desc', 'size_desc', 'size_asc');
+}
+
+/**
+ * Focus mode of the mailbox: Dolibarr's left menu is hidden on the mailbox pages, so the panes get the width
+ *
+ * @return bool
+ */
+function convomail_focus_mode()
+{
+	return (bool) getDolUserInt('CONVOMAIL_FOCUS');
 }
 
 /**
