@@ -126,7 +126,7 @@ class ConvomailInvoiceFill
 			if ($airead['ok']) {
 				$short = $langs->transnoentitiesnoconv('ConvomailReadAi');
 				$out['notes'][] = array('level' => 'warning', 'text' => $langs->transnoentitiesnoconv('ConvomailReadAiCheck'));
-				return $this->apply($out, $airead['hints'], $short, $langs->transnoentitiesnoconv('ConvomailReadAiOrigin', $read['filename']), $airead['problems']);
+				return $this->apply($out, (array) $airead['hints'], $short, $langs->transnoentitiesnoconv('ConvomailReadAiOrigin', $read['filename']), $airead['problems']);
 			}
 			foreach ($airead['problems'] as $problem) {
 				$out['notes'][] = array('level' => 'warning', 'text' => self::problemText($problem));
@@ -148,7 +148,7 @@ class ConvomailInvoiceFill
 	 *
 	 * @param  ConvomailInvoiceReader $reader Reader
 	 * @param  string                 $text   PDF text
-	 * @return array{ok:bool,hints:?array,problems:array,masked:bool}
+	 * @return array{ok:bool,hints:?array<string,mixed>,problems:array<int,array{code:string,args:array<int,mixed>}>,masked:bool}
 	 */
 	private function cachedAiRead($reader, $text)
 	{
@@ -178,7 +178,7 @@ class ConvomailInvoiceFill
 	 * @param  array<string,mixed> $h        Hints (ConvomailEInvoice::parse() shape)
 	 * @param  string              $short    Source shown on the badges
 	 * @param  string              $origin   Source in a sentence
-	 * @param  array               $problems Reader problems
+	 * @param  array<int,array{code:string,args:array<int,mixed>}> $problems Reader problems
 	 * @return array<string,mixed>
 	 */
 	private function apply(array $out, array $h, $short, $origin, array $problems)
@@ -194,7 +194,7 @@ class ConvomailInvoiceFill
 			return $out;
 		}
 
-		$v = $out['values'];
+		$v = (array) $out['values'];
 		if ($h['number'] !== '') {
 			$v['ref_supplier'] = dol_trunc($h['number'], 180, 'right', 'UTF-8', 1);
 			$out['sources']['ref_supplier'] = $short;
@@ -287,7 +287,9 @@ class ConvomailInvoiceFill
 				$note('info', $langs->transnoentitiesnoconv('ConvomailReadVatNotSupplier', $found[0]['nom'], $h['seller_vat']));
 				return;
 			}
-			$note('info', $langs->transnoentitiesnoconv($h['seller_name'] !== '' ? 'ConvomailReadSellerVat' : 'ConvomailReadSellerVatOnly', $seller, $h['seller_vat']));
+			// Without a seller name, only the VAT number (Dolibarr's translations take no %2$s)
+			$sellerargs = ($h['seller_name'] !== '') ? array($seller, $h['seller_vat']) : array($h['seller_vat']);
+			$note('info', $langs->transnoentitiesnoconv($h['seller_name'] !== '' ? 'ConvomailReadSellerVat' : 'ConvomailReadSellerVatOnly', ...$sellerargs));
 			return;
 		}
 		if ($h['seller_vat'] === '') {
@@ -367,7 +369,7 @@ class ConvomailInvoiceFill
 	/**
 	 * A reader problem in the user's words: field codes become the panel's labels
 	 *
-	 * @param  array{code:string,args:array} $problem Problem
+	 * @param  array{code:string,args:array<int,mixed>} $problem Problem
 	 * @return string
 	 */
 	private static function problemText(array $problem)

@@ -80,7 +80,8 @@ class ConvomailThread
 		$known = array($message['msgid'] => true);
 		$roundof = array($message);
 
-		for ($round = 0; $round < self::ROUNDS && !empty($roundof) && count($items) < self::MAX; $round++) {
+		$round = 0;
+		while ($round < self::ROUNDS && !empty($roundof) && count($items) < self::MAX) {
 			// Parents of the messages found last round, sent before them; replies to them, sent after
 			$parents = array();
 			$answering = array();
@@ -117,6 +118,7 @@ class ConvomailThread
 					$roundof[] = $m;
 				}
 			}
+			$round++;
 		}
 
 		if (count($items) < 2) {
@@ -174,8 +176,8 @@ class ConvomailThread
 		$opened = 0;
 		$opens = ConvomailTracker::opens($db, (int) $account->id, array_column($items, 'msgid'));
 		foreach ($items as $m) {
-			$from = $m['from'][0] ?? array('name' => '', 'email' => '');
-			$mine = in_array(strtolower($from['email']), $myemails, true);
+			$sender = $m['from'][0] ?? array('name' => '', 'email' => '');
+			$mine = in_array(strtolower($sender['email']), $myemails, true);
 			$classes = 'cm-conv-item'.($m['current'] ? ' cm-conv-current' : '').($mine ? ' cm-conv-mine' : '');
 			if ($aftercurrent && !$m['current'] && $opened < self::AUTOOPEN) {
 				$classes .= ' cm-autoopen';
@@ -187,7 +189,7 @@ class ConvomailThread
 			$h .= '<div class="'.$classes.'"'.($m['current'] ? '' : ' data-body="'.dol_escape_htmltag($bodyurl.$params).'"').'>';
 			$h .= '<div class="cm-conv-head">';
 			$h .= '<span class="cm-conv-who">'.img_picto($mine ? $langs->trans('ConvomailSentByYou') : '', $mine ? 'fa-paper-plane' : 'fa-envelope', 'class="pictofixedwidth opacitymedium"');
-			$h .= '<strong>'.dol_escape_htmltag($from['name'] !== '' ? $from['name'] : $from['email']).'</strong>';
+			$h .= '<strong>'.dol_escape_htmltag($sender['name'] !== '' ? $sender['name'] : $sender['email']).'</strong>';
 			if ($mine && !empty($m['to'])) {
 				$h .= ' <span class="opacitymedium">'.$langs->trans('ConvomailTo').' '.dol_escape_htmltag(convomail_format_addresses($m['to'])).'</span>';
 			}

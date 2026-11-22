@@ -76,7 +76,7 @@ class ConvomailTargets
 	 *
 	 * @param  string $type Type
 	 * @param  User   $user User
-	 * @return bool
+	 * @return bool|int<0,1>   Truthy when allowed (hasRight() gives 0 or 1)
 	 */
 	public static function canWrite($type, User $user)
 	{
@@ -236,21 +236,21 @@ class ConvomailTargets
 			'fichinter' => array('fichinter', array('ref', 'ref_client'), 'intervention'),
 		);
 		// "PO #4512", "Invoice INV-2026-0042", "(PROV2)": words with a digit
-		$tokens = array();
+		$sqltokens = array();
 		if (preg_match_all('/[A-Za-z0-9][A-Za-z0-9\-\/_.()]{1,40}/', (string) $subject, $m)) {
 			foreach ($m[0] as $t) {
 				$t = trim($t, '.');
 				if (preg_match('/[0-9]/', $t) && dol_strlen($t) >= 3) {
-					$tokens[$t] = "'".$this->db->escape($t)."'";
+					$sqltokens[$t] = "'".$this->db->escape($t)."'";
 					$bare = trim($t, '()');
-					$tokens[$bare] = "'".$this->db->escape($bare)."'";
+					$sqltokens[$bare] = "'".$this->db->escape($bare)."'";
 				}
 			}
 		}
-		$tokens = array_slice($tokens, 0, 12);
+		$sqltokens = array_slice($sqltokens, 0, 12);
 		$out = array();
 		$passes = array();
-		if (!empty($tokens)) {
+		if (!empty($sqltokens)) {
 			$passes[] = 'ref';
 		}
 		if ((int) $socid > 0 && $recent > 0) {
@@ -264,11 +264,11 @@ class ConvomailTargets
 				list($table, $cols, $entityel) = $refcols[$type];
 				$sql = 'SELECT t.rowid FROM '.MAIN_DB_PREFIX.$table.' as t WHERE t.entity IN ('.getEntity($entityel).')';
 				if ($pass === 'ref') {
-					$or = array();
+					$sqlor = array();
 					foreach ($cols as $col) {
-						$or[] = 't.'.$col.' IN ('.implode(',', $tokens).')';
+						$sqlor[] = 't.'.$this->db->sanitize($col).' IN ('.implode(',', $sqltokens).')';
 					}
-					$sql .= ' AND ('.implode(' OR ', $or).')'.((int) $socid > 0 ? ' ORDER BY (t.fk_soc = '.((int) $socid).') DESC, t.rowid DESC' : ' ORDER BY t.rowid DESC').$this->db->plimit(5);
+					$sql .= ' AND ('.implode(' OR ', $sqlor).')'.((int) $socid > 0 ? ' ORDER BY (t.fk_soc = '.((int) $socid).') DESC, t.rowid DESC' : ' ORDER BY t.rowid DESC').$this->db->plimit(5);
 				} else {
 					$sql .= ' AND t.fk_soc = '.((int) $socid).' ORDER BY t.rowid DESC'.$this->db->plimit((int) $recent);
 				}
@@ -310,9 +310,9 @@ class ConvomailTargets
 			}
 			$where = array();
 			foreach ($info[$type][1] as $col) {
-				$where[] = 't.'.$col." LIKE '%".$like."%'";
+				$where[] = 't.'.$this->db->sanitize($col)." LIKE '%".$like."%'";
 			}
-			$sql = 'SELECT t.rowid FROM '.MAIN_DB_PREFIX.$info[$type][0].' as t WHERE ('.implode(' OR ', $where).') AND t.entity IN ('.getEntity($info[$type][2]).')';
+			$sql = 'SELECT t.rowid FROM '.MAIN_DB_PREFIX.$this->db->sanitize($info[$type][0]).' as t WHERE ('.implode(' OR ', $where).') AND t.entity IN ('.getEntity($info[$type][2]).')';
 			if ($type === 'societe') {
 				$sql .= ' AND t.status = 1';
 				if ($role === 'supplier') {
@@ -330,6 +330,8 @@ class ConvomailTargets
 				}
 				// One type searched (the third party of a new record): its kind goes without saying
 				$label = (count($types) === 1 && $type === 'societe') ? (string) $o->name : self::label($type, $o);
+				// socid or fk_soc, depending on the record's class (neither is declared on CommonObject)
+				// @phan-suppress-next-line PhanUndeclaredProperty
 				$socid = ($type === 'societe') ? 0 : (int) ($o->socid ?? ($o->fk_soc ?? 0));
 				if ($socid > 0) {
 					if (!isset($socnames[$socid])) {

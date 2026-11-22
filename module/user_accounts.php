@@ -14,7 +14,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -26,6 +26,17 @@ if (!$res && file_exists("../../../main.inc.php")) {
 if (!$res) {
 	die("Include of main fails");
 }
+
+/**
+ * @var Conf $conf
+ * @var DoliDB $db
+ * @var Translate $langs
+ * @var User $user
+ */
+'@phan-var-force Conf $conf';
+'@phan-var-force DoliDB $db';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/usergroups.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
@@ -248,8 +259,8 @@ if ($action == 'create' || ($action == 'edit' && $account->id > 0)) {
 		print '<td>'.dol_escape_htmltag($acc->smtp_host.':'.$acc->smtp_port).'</td>';
 		print '<td class="nowraponall">';
 		if ($acc->isOAuth()) {
-			$code = ConvomailOAuth::providerOfApp($acc->oauth_app);
-			print dol_escape_htmltag($providers[$code]['label'] ?? $acc->oauth_app).'<br>';
+			$code = ConvomailOAuth::providerOfApp((string) $acc->oauth_app);
+			print dol_escape_htmltag($providers[$code]['label'] ?? (string) $acc->oauth_app).'<br>';
 			$st = $oauth->status($acc);
 			if (!$st['connected']) {
 				print dolGetStatus($langs->trans('ConvomailOAuthStatusNone'), '', '', 'status8', 2);

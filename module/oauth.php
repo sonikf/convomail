@@ -18,7 +18,7 @@
  */
 
 $res = 0;
-if (!$res && file_exists("../main.inc.php")) {
+if (file_exists("../main.inc.php")) {
 	$res = @include "../main.inc.php";
 }
 if (!$res && file_exists("../../main.inc.php")) {
@@ -30,6 +30,15 @@ if (!$res && file_exists("../../../main.inc.php")) {
 if (!$res) {
 	die("Include of main fails");
 }
+
+/**
+ * @var DoliDB $db
+ * @var Translate $langs
+ * @var User $user
+ */
+'@phan-var-force DoliDB $db';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 dol_include_once('/convomail/class/convomailaccount.class.php');
 dol_include_once('/convomail/class/convomailoauth.class.php');
@@ -78,7 +87,7 @@ if ($action == 'connect') {
 		accessforbidden();
 	}
 	// The admin may have switched the provider to another app since the account was set up
-	$current = ConvomailOAuth::appFor(ConvomailOAuth::providerOfApp($account->oauth_app));
+	$current = ConvomailOAuth::appFor(ConvomailOAuth::providerOfApp((string) $account->oauth_app));
 	if ($current !== '' && $current !== $account->oauth_app) {
 		$oauth->disconnect($account);
 		$account->oauth_app = $current;

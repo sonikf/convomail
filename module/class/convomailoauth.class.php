@@ -231,7 +231,7 @@ class ConvomailOAuth
 			$this->error = $e->getMessage();
 			return false;
 		}
-		if (!$service) {
+		if (!($service instanceof \OAuth\OAuth2\Service\AbstractService)) {
 			$this->error = $langs->trans('ConvomailOAuthAppMissing', $app);
 			return false;
 		}

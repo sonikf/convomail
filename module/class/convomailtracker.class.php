@@ -111,15 +111,15 @@ class ConvomailTracker
 	public static function opens($db, $accountid, array $msgids)
 	{
 		$out = array();
-		$in = array();
+		$sqlin = array();
 		foreach (array_unique(array_filter(array_map('strval', $msgids))) as $msgid) {
-			$in[] = "'".$db->escape($msgid)."'";
+			$sqlin[] = "'".$db->escape($msgid)."'";
 		}
-		if (!self::isEnabled() || empty($in)) {
+		if (!self::isEnabled() || empty($sqlin)) {
 			return $out;
 		}
 		$sql = 'SELECT msgid, nb_open, date_first_open, date_last_open, open_detail FROM '.MAIN_DB_PREFIX.'convomail_message';
-		$sql .= ' WHERE fk_account = '.((int) $accountid).' AND track_key IS NOT NULL AND msgid IN ('.implode(',', array_slice($in, 0, 500)).')';
+		$sql .= ' WHERE fk_account = '.((int) $accountid).' AND track_key IS NOT NULL AND msgid IN ('.implode(',', array_slice($sqlin, 0, 500)).')';
 		$sql .= ' AND entity IN ('.getEntity('convomailmessage').')';
 		$resql = $db->query($sql);
 		while ($resql && ($obj = $db->fetch_object($resql))) {
@@ -261,7 +261,7 @@ class ConvomailTracker
 		$since = $this->db->idate(dol_now() - self::LOGIN_IP_DAYS * 86400);
 		$sql = 'SELECT iplastlogin, datelastlogin, ippreviouslogin, datepreviouslogin FROM '.MAIN_DB_PREFIX.'user';
 		$sql .= ' WHERE statut = 1 AND (fk_soc IS NULL OR fk_soc = 0)';
-		$sql .= " AND (datelastlogin >= '".$since."' OR datepreviouslogin >= '".$since."')";
+		$sql .= " AND (datelastlogin >= '".$this->db->escape($since)."' OR datepreviouslogin >= '".$this->db->escape($since)."')";
 		$resql = $this->db->query($sql);
 		$limit = $this->db->jdate($since);
 		while ($resql && ($obj = $this->db->fetch_object($resql))) {

@@ -65,7 +65,6 @@ class ConvomailLogger
 		$event->note_private = (string) $data['body'];
 		$event->datep = $now;
 		$event->datef = $now;
-		$event->durationp = 0;
 		$event->percentage = -1;	// Not applicable
 		$event->authorid = $user->id;
 		$event->userownerid = $user->id;
@@ -97,7 +96,6 @@ class ConvomailLogger
 
 		// Thirdparty, contact and project have their own fields; only documents go into fk_element/elementtype
 		if (!empty($data['origin']) && !empty($data['originid']) && !in_array($data['origin'], array('societe', 'contact', 'project'))) {
-			$event->fk_element = (int) $data['originid'];
 			$event->elementid = (int) $data['originid'];
 			$event->elementtype = $data['origin'];
 		}
@@ -161,7 +159,6 @@ class ConvomailLogger
 		$event->note_private = (string) $data['body'];
 		$event->datep = $date;
 		$event->datef = $date;
-		$event->durationp = 0;
 		$event->percentage = -1;
 		$event->authorid = $user->id;
 		$event->userownerid = $user->id;
@@ -182,7 +179,6 @@ class ConvomailLogger
 		}
 		// As for sent mail: third party, contact and project have their own fields; documents go into fk_element
 		if (!empty($data['origin']) && !empty($data['originid']) && !in_array($data['origin'], array('societe', 'contact', 'project'))) {
-			$event->fk_element = (int) $data['originid'];
 			$event->elementid = (int) $data['originid'];
 			$event->elementtype = $data['origin'];
 		}
@@ -257,32 +253,32 @@ class ConvomailLogger
 	 */
 	public function linkEvent($eventid, $origin, $originid, $socid = 0, $replace = false, $projectid = 0)
 	{
-		$set = array();
+		$sqlset = array();
 		$where = '';
 		// As ActionComm::create() stores them (facture => invoice...), so the record's event list finds it
 		$map = array('facture' => 'invoice', 'commande' => 'order', 'contrat' => 'contract');
 		$origin = $map[$origin] ?? $origin;
 		if ($origin === 'project') {
-			$set[] = 'fk_project = '.((int) $originid);
+			$sqlset[] = 'fk_project = '.((int) $originid);
 			$where = ' AND (fk_project IS NULL OR fk_project = 0 OR fk_project = '.((int) $originid).')';
 		} elseif (!in_array($origin, array('societe', 'contact'), true)) {
-			$set[] = 'fk_element = '.((int) $originid);
-			$set[] = "elementtype = '".$this->db->escape($origin)."'";
+			$sqlset[] = 'fk_element = '.((int) $originid);
+			$sqlset[] = "elementtype = '".$this->db->escape($origin)."'";
 			if (!$replace) {
 				$where = ' AND (fk_element IS NULL OR fk_element = 0 OR (fk_element = '.((int) $originid)." AND elementtype = '".$this->db->escape($origin)."'))";
 			}
 		}
 		// Moved to another record (the user asked): its third party goes with it; otherwise only filled when empty
 		if ((int) $socid > 0) {
-			$set[] = $replace ? 'fk_soc = '.((int) $socid) : 'fk_soc = CASE WHEN fk_soc IS NULL OR fk_soc = 0 THEN '.((int) $socid).' ELSE fk_soc END';
+			$sqlset[] = $replace ? 'fk_soc = '.((int) $socid) : 'fk_soc = CASE WHEN fk_soc IS NULL OR fk_soc = 0 THEN '.((int) $socid).' ELSE fk_soc END';
 		}
 		if ((int) $projectid > 0 && $origin !== 'project') {
-			$set[] = 'fk_project = CASE WHEN fk_project IS NULL OR fk_project = 0 THEN '.((int) $projectid).' ELSE fk_project END';
+			$sqlset[] = 'fk_project = CASE WHEN fk_project IS NULL OR fk_project = 0 THEN '.((int) $projectid).' ELSE fk_project END';
 		}
-		if (empty($set)) {
+		if (empty($sqlset)) {
 			return 1;
 		}
-		$sql = 'UPDATE '.MAIN_DB_PREFIX.'actioncomm SET '.implode(', ', $set).' WHERE id = '.((int) $eventid).' AND entity IN ('.getEntity('agenda').')'.$where;
+		$sql = 'UPDATE '.MAIN_DB_PREFIX.'actioncomm SET '.implode(', ', $sqlset).' WHERE id = '.((int) $eventid).' AND entity IN ('.getEntity('agenda').')'.$where;
 		$resql = $this->db->query($sql);
 		if (!$resql) {
 			$this->error = $this->db->lasterror();

@@ -1,5 +1,6 @@
 <?php
 /* Copyright (C) 2026 DPG Supply
+ * Copyright (C) 2026 Nick Fragoulis
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,24 +25,29 @@
 /**
  * Tabs of the module setup page
  *
- * @return array<int,array<int,string>>
+ * @return array<int,array{0:string,1:string,2:string}>
  */
 function convomail_admin_prepare_head()
 {
+	/** @var Translate $langs */
+	/** @var Conf $conf */
 	global $langs, $conf;
 	$langs->load('convomail@convomail');
 
 	$h = 0;
 	$head = array();
 
-	$head[$h][0] = dol_buildpath('/convomail/admin/setup.php', 1);
-	$head[$h][1] = $langs->trans('Settings');
-	$head[$h][2] = 'settings';
-	$h++;
+	$tabs = array('settings' => 'Settings', 'tools' => 'ConvomailSetupTabTools', 'tracking' => 'ConvomailSetupTabTracking', 'oauth' => 'ConvomailSetupTabOAuth');
+	foreach ($tabs as $tab => $label) {
+		$head[$h][0] = dol_buildpath('/convomail/admin/setup.php', 1).($tab !== 'settings' ? '?tab='.$tab : '');
+		$head[$h][1] = $langs->trans($label);
+		$head[$h][2] = $tab;
+		$h++;
+	}
 
 	complete_head_from_modules($conf, $langs, null, $head, $h, 'convomail@convomail');
 
-	return $head;
+	return array_values($head);
 }
 
 /**
@@ -251,6 +257,60 @@ function convomail_page_size()
 function convomail_show_conversation()
 {
 	return !getDolUserInt('CONVOMAIL_HIDE_CONVERSATION');
+}
+
+/**
+ * Density of the message list rows, chosen in the list head (Display) and remembered for the user
+ *
+ * @return string compact (one line, no picture), normal (two lines with a small picture) or comfortable (three lines)
+ */
+function convomail_density()
+{
+	$density = getDolUserString('CONVOMAIL_DENSITY');
+	return in_array($density, array('compact', 'comfortable'), true) ? $density : 'normal';
+}
+
+/**
+ * Layout of the message list, chosen in the list head (Display) and remembered for the user
+ *
+ * @return string list (rows of two lines beside the reading pane) or table (columns, the reading pane under the list)
+ */
+function convomail_list_view()
+{
+	return getDolUserString('CONVOMAIL_VIEW') === 'table' ? 'table' : 'list';
+}
+
+/**
+ * Order of the message list, remembered for the user (Display menu, or a column heading of the table)
+ *
+ * @return string date_desc (newest first, the default), date_asc, from_asc, from_desc, subject_asc, subject_desc,
+ *                size_desc or size_asc
+ */
+function convomail_sort()
+{
+	$sort = getDolUserString('CONVOMAIL_SORT');
+	return in_array($sort, convomail_sorts(), true) ? $sort : 'date_desc';
+}
+
+/**
+ * Orders offered for the message list (the mailbox client also takes to_asc and to_desc, used in Sent and Drafts
+ * where the rows show the recipient)
+ *
+ * @return string[]
+ */
+function convomail_sorts()
+{
+	return array('date_desc', 'date_asc', 'from_asc', 'from_desc', 'subject_asc', 'subject_desc', 'size_desc', 'size_asc');
+}
+
+/**
+ * Focus mode of the mailbox: Dolibarr's left menu is hidden on the mailbox pages, so the panes get the width
+ *
+ * @return bool
+ */
+function convomail_focus_mode()
+{
+	return (bool) getDolUserInt('CONVOMAIL_FOCUS');
 }
 
 /**
@@ -494,7 +554,7 @@ function convomail_project_contacts($db, $projectid)
 			while ($obj = $db->fetch_object($resql)) {
 				$key = strtolower($obj->email);
 				if (!isset($out[$key]) && isValidEmail($obj->email)) {
-					$out[$key] = array('name' => trim($obj->firstname.' '.$obj->lastname), 'email' => $obj->email, 'role' => (string) $obj->poste);
+					$out[$key] = array('name' => trim($obj->firstname.' '.$obj->lastname), 'email' => (string) $obj->email, 'role' => (string) $obj->poste);
 				}
 			}
 		}
@@ -571,11 +631,11 @@ function convomail_account_from_post(ConvomailAccount $account)
 	$method = GETPOST('auth_method', 'aZ09');
 	$app = ($method !== 'password') ? ConvomailOAuth::appFor($method) : '';
 	if ($app !== '') {
-		if ($account->id > 0 && $account->isOAuth() && ConvomailOAuth::providerOfApp($account->oauth_app) !== $method) {
+		if ($account->id > 0 && $account->isOAuth() && ConvomailOAuth::providerOfApp((string) $account->oauth_app) !== $method) {
 			// Another provider: the old token is of no use
 			(new ConvomailOAuth($account->db))->disconnect($account);
 		}
-		if (!$account->isOAuth() || ConvomailOAuth::providerOfApp($account->oauth_app) !== $method) {
+		if (!$account->isOAuth() || ConvomailOAuth::providerOfApp((string) $account->oauth_app) !== $method) {
 			$account->oauth_app = $app;
 		}
 		$account->auth_type = ConvomailAccount::AUTH_OAUTH;
@@ -645,7 +705,7 @@ function convomail_account_form_fields(ConvomailAccount $account, $iscreate, $fo
 	}
 
 	if (count($authmethods) > 1 || $account->isOAuth()) {
-		$currentmethod = $account->isOAuth() ? ConvomailOAuth::providerOfApp($account->oauth_app) : 'password';
+		$currentmethod = $account->isOAuth() ? ConvomailOAuth::providerOfApp((string) $account->oauth_app) : 'password';
 		print '<tr><td class="titlefieldcreate">'.$langs->trans('ConvomailAuthType').'</td><td>';
 		print $form->selectarray('auth_method', $authmethods, $currentmethod, 0, 0, 0, '', 0, 0, 0, '', 'minwidth200');
 		print ' '.$form->textwithpicto('', $langs->trans('ConvomailAuthTypeHelp'));
@@ -839,9 +899,9 @@ function convomail_filing_cell(ConvomailAccount $account, User $user, $formurl, 
 		foreach ($hidden as $name => $value) {
 			$more .= '<input type="hidden" name="'.dol_escape_htmltag($name).'" value="'.dol_escape_htmltag((string) $value).'">';
 		}
-		return '<form method="POST" action="'.dol_escape_htmltag($formurl).'" class="inline-block">'
-			.'<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="'.$action.'">'
-			.'<input type="hidden" name="accountid" value="'.((int) $account->id).'">'.$more
+		return '<form method="POST" action="'.dol_escape_htmltag($formurl)
+			.'" class="inline-block"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="'.$action
+			.'"><input type="hidden" name="accountid" value="'.((int) $account->id).'">'.$more
 			.'<button type="submit" class="button smallpaddingimp classfortooltip'.($primary ? '' : ' button-cancel').'" title="'.dol_escape_htmltag($help).'">'.dol_escape_htmltag($label).'</button></form>';
 	};
 
@@ -980,4 +1040,258 @@ function convomail_log_read($db, $user, $account)
 	} else {
 		dol_syslog(__FUNCTION__.' '.$event->error, LOG_WARNING);
 	}
+}
+
+/**
+ * JSON answer of an AJAX endpoint; ends the request
+ *
+ * @param  array<string,mixed> $data Response
+ * @param  int                 $code HTTP status
+ * @return never
+ */
+function convomail_json($data, $code = 200)
+{
+	global $db;
+	http_response_code($code);
+	top_httphead('application/json');
+	print json_encode($data);
+	$db->close();
+	exit;
+}
+
+/**
+ * The draft a compose form replaces when saved again, or removes once sent: only a draft in the Drafts folder of an
+ * account the user may send with
+ *
+ * @param  DoliDB $db        Database
+ * @param  User   $user      User
+ * @param  int    $accountid Account the draft is in
+ * @param  string $folder    Folder
+ * @param  int    $uid       UID
+ * @return array{0:ConvomailAccount,1:string,2:int}|null
+ */
+function convomail_draft_target($db, $user, $accountid, $folder, $uid)
+{
+	if ($accountid <= 0 || $folder === '' || $uid <= 0) {
+		return null;
+	}
+	$account = convomail_get_usable_account($db, $user, $accountid);
+	if (!$account || !$account->canSend($user)) {
+		return null;
+	}
+	dol_include_once('/convomail/class/hordemailboxclient.class.php');
+	$client = new ConvomailHordeMailboxClient($account);
+	$drafts = $client->findFolderByRole('drafts');
+	$client->close();
+	return ($drafts !== '' && $drafts === $folder) ? array($account, $folder, (int) $uid) : null;
+}
+
+/**
+ * Object for the substitutions of a template (__THIRDPARTY_NAME__, __PROJECT_REF__...): project first, then contact,
+ * then third party, each only if the user may see it
+ *
+ * @param  DoliDB $db        Database
+ * @param  User   $user      User
+ * @param  int    $projectid Project
+ * @param  int    $contactid Contact
+ * @param  int    $socid     Third party
+ * @return CommonObject|null
+ */
+function convomail_substitution_object($db, $user, $projectid, $contactid, $socid)
+{
+	if ($projectid > 0 && isModEnabled('project')) {
+		require_once DOL_DOCUMENT_ROOT.'/projet/class/project.class.php';
+		$p = new Project($db);
+		if ($p->fetch($projectid) > 0 && $p->restrictedProjectArea($user, 'read') > 0) {
+			$p->fetch_thirdparty();
+			return $p;
+		}
+	}
+	if ($contactid > 0) {
+		require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
+		$c = new Contact($db);
+		if ($c->fetch($contactid) > 0) {
+			return $c;
+		}
+	}
+	if ($socid > 0) {
+		require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
+		$s = new Societe($db);
+		if ($s->fetch($socid) > 0) {
+			return $s;
+		}
+	}
+	return null;
+}
+
+/**
+ * Addresses of a message field, as typed in a compose field
+ *
+ * @param  array<string,mixed> $message Message of fetchMessage()
+ * @param  string              $key     to, cc, bcc, from, reply_to
+ * @return string                       "Name <address>, ..."
+ */
+function convomail_message_addresses(array $message, $key)
+{
+	/** @var array<int,array{name:string,email:string}> $list */
+	$list = is_array($message[$key] ?? null) ? $message[$key] : array();
+	return convomail_format_addresses($list, true);
+}
+
+/**
+ * Messages set by setEventMessages() during this request, taken out of the session (for a JSON answer)
+ *
+ * @return array{mesgs:string[],warnings:string[],errors:string[]}
+ */
+function convomail_take_event_messages()
+{
+	$out = array('mesgs' => array(), 'warnings' => array(), 'errors' => array());
+	$events = (isset($_SESSION['dol_events']) && is_array($_SESSION['dol_events'])) ? $_SESSION['dol_events'] : array();
+	foreach (array_keys($out) as $kind) {
+		foreach ((array) ($events[$kind] ?? array()) as $text) {
+			if (is_string($text)) {
+				$out[$kind][] = $text;
+			}
+		}
+	}
+	unset($_SESSION['dol_events']);
+	return $out;
+}
+
+/**
+ * A text field of a message (subject...), '' when missing
+ *
+ * @param  array<string,mixed> $message Message of fetchMessage()
+ * @param  string              $key     Field
+ * @return string
+ */
+function convomail_message_text(array $message, $key)
+{
+	$value = $message[$key] ?? '';
+	return is_string($value) ? $value : '';
+}
+
+/**
+ * Text of a compose form without the user's signature (and what follows it), for a template
+ *
+ * @param  string $body HTML or plain text
+ * @return string
+ */
+function convomail_without_signature($body)
+{
+	$pos = false;
+	// The editor drops the convomail-signature class, so the "-- " line that starts a signature is looked for too
+	$patterns = array('#<div[^>]*class="convomail-signature"#i', '#<(?:div|p)\b[^>]*>\s*--(?:\s|&nbsp;)*(?:<|\R)#i', '#(<br\s*/?>\s*)?--\s*<br#', '#(^|\R)-- \R#');
+	foreach ($patterns as $re) {
+		if (preg_match($re, $body, $m, PREG_OFFSET_CAPTURE) && ($pos === false || $m[0][1] < $pos)) {
+			$pos = $m[0][1];
+		}
+	}
+	if ($pos === false) {
+		return $body;
+	}
+	$kept = rtrim(substr($body, 0, (int) $pos));
+	// Paragraphs left empty above the signature go too
+	return (string) preg_replace('#(\s*<p>(?:\s|&nbsp;|\x{00A0}|<br\s*/?>)*</p>)+$#iu', '', $kept);
+}
+
+/**
+ * Save a subject and text as a private email template of the user, for every type of email ('all'), as Setup >
+ * Emails > Email templates would. The user's own template with the same name is replaced; a name another user's
+ * template already has gets the user's login added. Files are not part of it: core's templates can only attach the
+ * record's generated document (UPSTREAM.md).
+ *
+ * @param  DoliDB $db      Database
+ * @param  User   $user    User
+ * @param  string $subject Subject, also the template's name
+ * @param  string $html    Text (HTML)
+ * @return array{id:int,label:string,new:bool,error:string} id <= 0 when not saved
+ */
+function convomail_save_email_template($db, $user, $subject, $html)
+{
+	global $conf, $langs;
+	/** @var Conf $conf */
+	/** @var Translate $langs */
+
+	$subject = trim($subject);
+	$name = dol_trunc($subject !== '' ? $subject : $langs->transnoentitiesnoconv('ConvomailTemplateUntitled'), 150, 'right', 'UTF-8', 1);
+	$login = ($user->login !== '') ? $user->login : (string) $user->id;
+	$out = array('id' => 0, 'label' => $name, 'new' => false, 'error' => '');
+
+	$hasclass = is_readable(DOL_DOCUMENT_ROOT.'/core/class/cemailtemplate.class.php');
+	if ($hasclass) {
+		require_once DOL_DOCUMENT_ROOT.'/core/class/cemailtemplate.class.php';
+		$hasclass = class_exists('CEmailTemplate');	// Dolibarr 25 and later; a direct insert before
+	}
+
+	foreach (array($name, $name.' ('.$login.')') as $label) {
+		// The name is unique per entity and language ('' = every language)
+		$sqlfind = "SELECT t.rowid, t.private, t.fk_user FROM ".MAIN_DB_PREFIX."c_email_templates as t";
+		$sqlfind .= " WHERE t.entity = ".((int) $conf->entity)." AND t.label = '".$db->escape($label)."'";
+		$sqlfind .= " AND (t.lang = '' OR t.lang IS NULL)";
+		$sqlfind .= $db->plimit(1);
+		$resql = $db->query($sqlfind);
+		if (!$resql || $resql === true) {
+			$out['error'] = $db->lasterror();
+			return $out;
+		}
+		/** @var ?stdClass $found */
+		$found = $db->fetch_object($resql);
+		$db->free($resql);
+		$foundid = ($found && is_numeric($found->rowid ?? null)) ? (int) $found->rowid : 0;
+		$own = ($found && is_numeric($found->private ?? null) && (int) $found->private === 1 && is_numeric($found->fk_user ?? null) && (int) $found->fk_user === (int) $user->id);
+		if ($foundid > 0 && !$own) {
+			continue;	// someone else's, or a shared template: try the name with the login
+		}
+
+		$out['label'] = $label;
+		$out['new'] = ($foundid === 0);
+		if ($hasclass) {
+			$template = new CEmailTemplate($db);
+			if ($foundid > 0 && $template->fetch($foundid) <= 0) {
+				$out['error'] = $template->error;
+				return $out;
+			}
+			$template->label = $label;
+			$template->topic = $subject;
+			$template->content = $html;
+			if ($foundid > 0) {
+				$result = $template->update($user);
+			} else {
+				$template->type_template = 'all';
+				$template->lang = '';
+				$template->private = 1;
+				$template->fk_user = (int) $user->id;
+				$template->position = 0;
+				$template->active = 1;
+				$template->enabled = '1';
+				$template->joinfiles = 0;
+				$result = $template->create($user);
+			}
+			if ($result <= 0) {
+				$out['error'] = $template->error !== '' ? $langs->transnoentitiesnoconv($template->error) : $db->lasterror();
+				return $out;
+			}
+			$out['id'] = ($foundid > 0) ? $foundid : (int) $template->id;
+			return $out;
+		}
+
+		if ($foundid > 0) {
+			$sqlsave = "UPDATE ".MAIN_DB_PREFIX."c_email_templates SET topic = '".$db->escape($subject)."', content = '".$db->escape($html)."'";
+			$sqlsave .= " WHERE rowid = ".((int) $foundid);
+		} else {
+			$sqlsave = "INSERT INTO ".MAIN_DB_PREFIX."c_email_templates (entity, type_template, lang, private, fk_user, datec, label, position, enabled, active, topic, joinfiles, content)";
+			$sqlsave .= " VALUES (".((int) $conf->entity).", 'all', '', 1, ".((int) $user->id).", '".$db->idate(dol_now())."', '".$db->escape($label)."', 0, '1', 1,";
+			$sqlsave .= " '".$db->escape($subject)."', '0', '".$db->escape($html)."')";
+		}
+		if (!$db->query($sqlsave)) {
+			$out['error'] = $db->lasterror();
+			return $out;
+		}
+		$out['id'] = ($foundid > 0) ? $foundid : (int) $db->last_insert_id(MAIN_DB_PREFIX.'c_email_templates');
+		return $out;
+	}
+
+	$out['error'] = $langs->transnoentitiesnoconv('ErrorLabelAlreadyExists');
+	return $out;
 }
