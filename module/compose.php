@@ -53,6 +53,11 @@ if (!$res) {
  * @var Translate $langs
  * @var User $user
  */
+'@phan-var-force Conf $conf';
+'@phan-var-force DoliDB $db';
+'@phan-var-force HookManager $hookmanager';
+'@phan-var-force Translate $langs';
+'@phan-var-force User $user';
 
 require_once DOL_DOCUMENT_ROOT.'/core/class/doleditor.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
@@ -216,7 +221,7 @@ $withuserdest = (bool) getDolGlobalString('MAIN_MAIL_ENABLED_USER_DEST_SELECT');
 $sendtouser = $withuserdest ? trim(GETPOST('sendtouser', 'alphawithlgt'), " ,;") : '';
 $sendtoccuser = $withuserdest ? trim(GETPOST('sendtoccuser', 'alphawithlgt'), " ,;") : '';
 $sendtobccuser = $withuserdest ? trim(GETPOST('sendtobccuser', 'alphawithlgt'), " ,;") : '';
-$subject = GETPOST('subject', 'alphanohtml');
+$subject = (string) (GETPOST('subject', 'alphanohtml') ?? '');
 // HTML goes through core's sanitizer. Plain text (editor off) is read raw because that sanitizer
 // collapses its line breaks; it is escaped before use, so it can never carry markup.
 // Rich editor whenever FCKeditor is on (a Convomail dependency), whatever the global "WYSIWYG for emails" setting says
@@ -871,7 +876,7 @@ if (!empty($templates)) {
 }
 print '</select></td></tr>';
 
-print '<tr><td class="fieldrequired">'.$langs->trans('MailTopic').'</td><td><input type="text" name="subject" class="quatrevingtpercent" value="'.dol_escape_htmltag($subject).'"></td></tr>';
+print '<tr><td class="fieldrequired">'.$langs->trans('MailTopic').'</td><td><input type="text" name="subject" class="quatrevingtpercent" value="'.dol_escape_htmltag($subject ?? '').'"></td></tr>';
 
 print '<tr><td>'.$langs->trans('MailFile').'</td><td>';
 // The original message's attachments: ticked for a forward, offered unticked for a reply. Then the images of its

@@ -101,8 +101,9 @@ class InterfaceConvomailTrigger extends DolibarrTriggers
 		}
 		$sql = "DELETE FROM ".MAIN_DB_PREFIX."convomail_message WHERE fk_actioncomm = ".((int) $eventid);
 		if (!$this->db->query($sql)) {
-			$this->error = $this->db->lasterror();
-			dol_syslog(__METHOD__.' '.$this->error, LOG_ERR);
+			$err = $this->db->lasterror();
+			$this->errors[] = $err;
+			dol_syslog(__METHOD__.' '.$err, LOG_ERR);
 			return -1;
 		}
 		return 1;
@@ -125,8 +126,9 @@ class InterfaceConvomailTrigger extends DolibarrTriggers
 		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."convomail_account WHERE fk_user = ".((int) $userid);
 		$resql = $this->db->query($sql);
 		if (!$resql || $resql === true) {
-			$this->error = $this->db->lasterror();
-			dol_syslog(__METHOD__.' '.$this->error, LOG_ERR);
+			$err = $this->db->lasterror();
+			$this->errors[] = $err;
+			dol_syslog(__METHOD__.' '.$err, LOG_ERR);
 			return -1;
 		}
 		$ids = array();
@@ -141,16 +143,18 @@ class InterfaceConvomailTrigger extends DolibarrTriggers
 			// Loaded without the entity filter of fetch(): the user's mailboxes in other entities go too
 			$account = new ConvomailAccount($this->db);
 			if ($account->fetchCommon($id) <= 0 || $account->delete($by) <= 0) {
-				$this->error = $account->error ?: $this->db->lasterror();
-				dol_syslog(__METHOD__.' mailbox '.$id.': '.$this->error, LOG_ERR);
+				$err = $account->error ?: $this->db->lasterror();
+				$this->errors[] = $err;
+				dol_syslog(__METHOD__.' mailbox '.$id.': '.$err, LOG_ERR);
 				return -1;
 			}
 		}
 
 		$sql = "DELETE FROM ".MAIN_DB_PREFIX."convomail_account_access WHERE fk_user = ".((int) $userid);
 		if (!$this->db->query($sql)) {
-			$this->error = $this->db->lasterror();
-			dol_syslog(__METHOD__.' '.$this->error, LOG_ERR);
+			$err = $this->db->lasterror();
+			$this->errors[] = $err;
+			dol_syslog(__METHOD__.' '.$err, LOG_ERR);
 			return -1;
 		}
 		dol_syslog(__METHOD__.' user '.$userid.': '.count($ids).' mailbox(es) deleted', LOG_INFO);
