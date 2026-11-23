@@ -17,1263 +17,220 @@
  */
 
 /**
- * \file    class/convomailaccount.class.php
+ * \file    class/actions_convomail.class.php
  * \ingroup convomail
- * \brief   A user's mail account (IMAP for the Sent copy, SMTP for sending)
+ * \brief   Hooks: element properties, "Send email" on third party / contact / project cards, "Reply" on email events
  */
-require_once DOL_DOCUMENT_ROOT.'/core/class/commonobject.class.php';
 
 /**
- * Class ConvomailAccount
+ * Class ActionsConvomail
  */
-class ConvomailAccount extends CommonObject
+class ActionsConvomail
 {
-	public $TRIGGER_PREFIX = 'CONVOMAIL';
-	public $module = 'convomail';
-	public $element = 'convomailaccount';
-	public $table_element = 'convomail_account';
-	/** @var string Picto */
-	public $picto = 'email';
-	public $ismultientitymanaged = 1;
-	public $isextrafieldmanaged = 0;
+	/** @var DoliDB */
+	public $db;
 
-	const STATUS_DISABLED = 0;
-	const STATUS_ENABLED = 1;
+	/** @var string */
+	public $error = '';
 
-	/** fk_user of a shared mailbox (sales@, support@) once loaded (NULL in the database): created by an admin, used by the users granted access */
-	const SHARED_OWNER = 0;
+	/** @var string[] */
+	public $errors = array();
 
-	const AUTH_PASSWORD = 'password';
+	/** @var array<string,mixed> */
+	public $results = array();
 
-	/** Access levels on a shared mailbox, each including the ones below it */
-	const LEVEL_READ = 1;		// open, read, file into Dolibarr
-	const LEVEL_HANDLE = 2;		// also organise: move, archive, delete, spam, flags
-	const LEVEL_SEND = 3;		// also send as the shared address
-	const LEVEL_MANAGE = 4;		// also manage: folders, sign-in, automatic filing
-
-	/** @var array<string,int> Levels read in this request (account-user), see level() */
-	private static $accessCache = array();
-	const AUTH_OAUTH = 'oauth';
-
-	/** SMTP hosts known to keep their own Sent copy. Also printed as a JavaScript regular expression on the account form */
-	const SAVES_SENT_HOSTS = '/(^|\.)(gmail|googlemail|office365|outlook|me|icloud|yahoo|aol)\.com$/i';
+	/** @var string */
+	public $resprints = '';
 
 	/**
-	 * @inheritdoc
-	 * Field definitions used by the *Common() methods
-	 */
-	public $fields = array(
-		'rowid'           => array('type' => 'integer', 'label' => 'TechnicalID', 'enabled' => 1, 'visible' => 0, 'notnull' => 1, 'position' => 1),
-		'entity'          => array('type' => 'integer', 'label' => 'Entity', 'enabled' => 1, 'visible' => 0, 'notnull' => 1, 'default' => '1', 'position' => 5),
-		// Owner. A shared mailbox has none: NULL in the database (notnull -1 makes core save 0 as NULL), SHARED_OWNER (0)
-		// on the object once loaded, so the rest of the code keeps one way to tell it (isShared())
-		'fk_user'         => array('type' => 'integer:User:user/class/user.class.php', 'label' => 'User', 'enabled' => 1, 'visible' => 1, 'notnull' => -1, 'position' => 10),
-		'label'           => array('type' => 'varchar(128)', 'label' => 'Label', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 20),
-		'email'           => array('type' => 'varchar(255)', 'label' => 'Email', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 30),
-		'imap_host'       => array('type' => 'varchar(255)', 'label' => 'ConvomailImapHost', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 40),
-		'imap_port'       => array('type' => 'integer', 'label' => 'ConvomailImapPort', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => '993', 'position' => 41),
-		'imap_encryption' => array('type' => 'varchar(8)', 'label' => 'ConvomailImapEncryption', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => 'ssl', 'position' => 42),
-		'smtp_host'       => array('type' => 'varchar(255)', 'label' => 'ConvomailSmtpHost', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 50),
-		'smtp_port'       => array('type' => 'integer', 'label' => 'ConvomailSmtpPort', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => '587', 'position' => 51),
-		'smtp_encryption' => array('type' => 'varchar(8)', 'label' => 'ConvomailSmtpEncryption', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => 'tls', 'position' => 52),
-		'login'           => array('type' => 'varchar(255)', 'label' => 'Login', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'position' => 60),
-		'auth_type'       => array('type' => 'varchar(16)', 'label' => 'ConvomailAuthType', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => 'password', 'position' => 58),
-		'oauth_app'       => array('type' => 'varchar(64)', 'label' => 'ConvomailOAuthApp', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 59),
-		'pass_crypted'    => array('type' => 'varchar(255)', 'label' => 'Password', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 61),
-		'sent_folder'     => array('type' => 'varchar(255)', 'label' => 'ConvomailSentFolder', 'enabled' => 1, 'visible' => 1, 'notnull' => 0, 'position' => 70),
-		'server_saves_sent' => array('type' => 'smallint', 'label' => 'ConvomailServerSavesSent', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => '0', 'position' => 75),
-		'is_default'      => array('type' => 'smallint', 'label' => 'Default', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => '0', 'position' => 80),
-		'date_delete'     => array('type' => 'datetime', 'label' => 'ConvomailDateDelete', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 85),
-		'status'          => array('type' => 'smallint', 'label' => 'Status', 'enabled' => 1, 'visible' => 1, 'notnull' => 1, 'default' => '1', 'position' => 1000),
-		'date_creation'   => array('type' => 'datetime', 'label' => 'DateCreation', 'enabled' => 1, 'visible' => 0, 'notnull' => 1, 'position' => 500),
-		'tms'             => array('type' => 'timestamp', 'label' => 'DateModification', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 501),
-		'fk_user_creat'   => array('type' => 'integer:User:user/class/user.class.php', 'label' => 'UserAuthor', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 510),
-		'fk_user_modif'   => array('type' => 'integer:User:user/class/user.class.php', 'label' => 'UserModif', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 511),
-		'import_key'      => array('type' => 'varchar(14)', 'label' => 'ImportId', 'enabled' => 1, 'visible' => 0, 'notnull' => 0, 'position' => 1001),
-	);
-
-	/** @var int ID */
-	public $rowid;
-	public $entity;
-	/** @var ?int Owner; SHARED_OWNER (0) for a shared mailbox, null on a new account */
-	public $fk_user;
-	/** @var string Name shown as sender */
-	public $label;
-	/** @var string Address */
-	public $email;
-	/** @var string IMAP host */
-	public $imap_host;
-	/** @var int IMAP port */
-	public $imap_port;
-	/** @var string ssl, tls or none */
-	public $imap_encryption;
-	/** @var string SMTP host */
-	public $smtp_host;
-	/** @var int SMTP port */
-	public $smtp_port;
-	/** @var string ssl, tls or none */
-	public $smtp_encryption;
-	/** @var string Login */
-	public $login;
-	/** @var string 'password' or 'oauth' */
-	public $auth_type = 'password';
-	/** @var ?string Core OAuth app key (e.g. GOOGLE-Mail) when auth_type is 'oauth', else null */
-	public $oauth_app;
-	/** @var string Password, encrypted with dolEncrypt() */
-	public $pass_crypted;
-	/** @var string Folder that keeps sent mail */
-	public $sent_folder;
-	/** @var int 1 when the SMTP server keeps its own Sent copy */
-	public $server_saves_sent;
-	/** @var int 1 for the user's default account */
-	public $is_default;
-	/** @var int|string|null When its user left: the date the account is deleted on (cronDeleteLeaving()) */
-	public $date_delete;
-	public $status;
-	public $date_creation;
-	public $fk_user_creat;
-	public $fk_user_modif;
-	public $import_key;
-
-	/**
-	 * Constructor
-	 *
 	 * @param DoliDB $db Database handler
 	 */
-	public function __construct(DoliDB $db)
+	public function __construct($db)
 	{
 		$this->db = $db;
-		self::checkSchema($db);
 	}
 
 	/**
-	 * Upgrade the tables once if the files are newer than the database (see modConvomail::upgradeSchema())
+	 * Top bar, next to the bookmarks: an envelope with the number of unread emails (ConvomailUnread), filled in by
+	 * js/convomail-topbar.js after the page has loaded, and the shortlist under it when the user wants one
 	 *
-	 * @param  DoliDB $db Database handler
-	 * @return void
+	 * @param  array<string,mixed> $parameters  Hook parameters
+	 * @param  CommonObject|null   $object      Object
+	 * @param  string              $action      Action
+	 * @param  HookManager         $hookmanager Hook manager
+	 * @return int                              0
 	 */
-	public static function checkSchema($db)
+	public function printTopRightMenu($parameters, &$object, &$action, $hookmanager)
 	{
-		static $checked = false;
+		global $user, $langs;
 
-		if ($checked || !isModEnabled('convomail')) {
-			return;
-		}
-		$checked = true;
-		dol_include_once('/convomail/core/modules/modConvomail.class.php');
-		$module = new modConvomail($db);
-		if (getDolGlobalString('CONVOMAIL_DB_VERSION') !== $module->version) {
-			dol_syslog(__METHOD__.' tables at '.getDolGlobalString('CONVOMAIL_DB_VERSION', 'unknown').', files at '.$module->version.': upgrading', LOG_NOTICE);
-			$module->upgradeSchema();
-		}
-	}
-
-	/**
-	 * Create the account in database
-	 *
-	 * @param  User $user      User that creates
-	 * @param  int  $notrigger 1 = do not call triggers
-	 * @return int             Id of created object if OK, <0 if KO
-	 */
-	public function create(User $user, $notrigger = 0)
-	{
-		global $conf;
-
-		if (!$this->checkHostAllowed()) {
-			return -1;
-		}
-		if (empty($this->entity)) {
-			$this->entity = $conf->entity;
-		}
-
-		$this->db->begin();
-		$result = $this->createCommon($user, $notrigger);
-		if ($result > 0 && $this->is_default) {
-			$result = $this->clearOtherDefaults();
-		}
-		if ($result < 0) {
-			$this->db->rollback();
-			return -1;
-		}
-		$this->db->commit();
-		self::clearSessionCache();
-		return $this->id;
-	}
-
-	/**
-	 * Load an account, restricted to the current entity
-	 *
-	 * @param  int    $id  Id of account
-	 * @param  string $ref Unused, kept for signature compatibility
-	 * @return int         >0 if OK, 0 if not found, <0 if KO
-	 */
-	public function fetch($id, $ref = null)
-	{
-		$result = $this->fetchCommon($id, null, ' AND t.entity IN ('.getEntity($this->element).')');
-		if ($result > 0 && empty($this->fk_user)) {
-			$this->fk_user = self::SHARED_OWNER;	// NULL owner in the database: a shared mailbox
-		}
-		return $result;
-	}
-
-	/**
-	 * Update the account in database
-	 *
-	 * @param  User $user      User that modifies
-	 * @param  int  $notrigger 1 = do not call triggers
-	 * @return int             >0 if OK, <0 if KO
-	 */
-	public function update(User $user, $notrigger = 0)
-	{
-		if (!$this->checkHostAllowed()) {
-			return -1;
-		}
-
-		$this->db->begin();
-		$this->fk_user_modif = $user->id;
-		$result = $this->updateCommon($user, $notrigger);
-		if ($result > 0 && $this->is_default) {
-			$result = $this->clearOtherDefaults();
-		}
-		if ($result < 0) {
-			$this->db->rollback();
-			return -1;
-		}
-		$this->db->commit();
-		self::clearSessionCache();
-		if (isModEnabled('emailcollector')) {
-			// Keep the automatic-filing collectors on the same server, login and Sent folder
-			dol_include_once('/convomail/class/convomailcollector.class.php');
-			(new ConvomailCollector($this->db))->sync($this, $user);
-		}
-		return 1;
-	}
-
-	/**
-	 * Delete the account. Logged messages and agenda events are kept.
-	 *
-	 * @param  User $user      User that deletes
-	 * @param  int  $notrigger 1 = do not call triggers
-	 * @return int             >0 if OK, <0 if KO
-	 */
-	public function delete(User $user, $notrigger = 0)
-	{
-		// The account and its grants go together, or neither does; grants first (they reference the account)
-		$this->db->begin();
-		$result = 1;
-		if (!$this->db->query("DELETE FROM ".MAIN_DB_PREFIX."convomail_account_access WHERE fk_account = ".((int) $this->id))) {
-			$this->error = $this->db->lasterror();
-			$result = -1;
-		}
-		if ($result > 0) {
-			$result = $this->deleteCommon($user, $notrigger);
-		}
-		if ($result <= 0) {
-			$this->db->rollback();
-			return $result;
-		}
-		$this->db->commit();
-		self::clearSessionCache();
-		if (isModEnabled('emailcollector')) {
-			dol_include_once('/convomail/class/convomailcollector.class.php');
-			(new ConvomailCollector($this->db))->remove($this, $user);
-		}
-		if ($this->isOAuth()) {
-			dol_include_once('/convomail/class/convomailoauth.class.php');
-			$oauth = new ConvomailOAuth($this->db);
-			$oauth->disconnect($this);
-		}
-		return $result;
-	}
-
-	/**
-	 * @return bool True when the account signs in with an OAuth token instead of a password
-	 */
-	public function isOAuth()
-	{
-		return $this->auth_type === self::AUTH_OAUTH;
-	}
-
-	/**
-	 * Forget the cached folder lists of the session
-	 *
-	 * @return void
-	 */
-	public static function clearSessionCache()
-	{
-		if (!isset($_SESSION)) {
-			return;
-		}
-		foreach (array_keys($_SESSION) as $key) {
-			if (strpos((string) $key, 'convomail_folders_') === 0) {
-				unset($_SESSION[$key]);
-			}
-		}
-	}
-
-	/**
-	 * Only one default account per user
-	 *
-	 * @return int >0 if OK, <0 if KO
-	 */
-	private function clearOtherDefaults()
-	{
-		if ($this->isShared()) {
-			return 1;	// "default" is a per-user choice
-		}
-		$sql = "UPDATE ".MAIN_DB_PREFIX.$this->table_element." SET is_default = 0";
-		$sql .= " WHERE fk_user = ".((int) $this->fk_user);
-		$sql .= " AND rowid <> ".((int) $this->id);
-		$sql .= " AND entity IN (".getEntity($this->element).")";
-		if (!$this->db->query($sql)) {
-			$this->errors[] = $this->db->lasterror();
-			return -1;
-		}
-		return 1;
-	}
-
-	/**
-	 * Store the password encrypted. An empty value keeps the current password.
-	 *
-	 * @param  string $password Clear password
-	 * @return void
-	 */
-	public function setPassword($password)
-	{
-		if ((string) $password === '') {
-			return;
-		}
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/security.lib.php';
-		$this->pass_crypted = dolEncrypt($password);
-	}
-
-	/**
-	 * Return the clear password. Never send it to the browser.
-	 *
-	 * @return string
-	 */
-	public function getPassword()
-	{
-		if (empty($this->pass_crypted)) {
-			return '';
-		}
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/security.lib.php';
-		return dolDecrypt($this->pass_crypted);
-	}
-
-	/**
-	 * Load the default enabled account of a user (or the first enabled one)
-	 *
-	 * @param  User $u User
-	 * @return int     >0 if found, 0 if none, <0 if KO
-	 */
-	public function fetchDefaultForUser(User $u)
-	{
-		// Own accounts first (default one first), then shared mailboxes the user was granted
-		$sql = "SELECT a.rowid FROM ".MAIN_DB_PREFIX.$this->table_element." as a";
-		$sql .= " LEFT JOIN ".MAIN_DB_PREFIX."convomail_account_access as g ON g.fk_account = a.rowid AND g.fk_user = ".((int) $u->id);
-		$sql .= " WHERE (a.fk_user = ".((int) $u->id)." OR (a.fk_user IS NULL AND g.rowid IS NOT NULL))";
-		$sql .= " AND a.status = ".self::STATUS_ENABLED;
-		$sql .= " AND a.entity IN (".getEntity($this->element).")";
-		$sql .= " ORDER BY CASE WHEN a.fk_user = ".((int) $u->id)." THEN 0 ELSE 1 END, a.is_default DESC, a.rowid ASC";
-		$sql .= $this->db->plimit(1);
-
-		$resql = $this->db->query($sql);
-		if (!$resql) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		$obj = $this->db->fetch_object($resql);
-		if (!$obj) {
+		if (!isModEnabled('convomail') || empty($user->id) || !empty($user->socid) || !$user->hasRight('convomail', 'account', 'read')) {
 			return 0;
 		}
-		return $this->fetch((int) $obj->rowid);
-	}
-
-	/**
-	 * List the accounts of a user
-	 *
-	 * @param  int  $fk_user     User id
-	 * @param  bool $onlyenabled Only enabled accounts
-	 * @return ConvomailAccount[]|int Array of accounts, <0 if KO
-	 */
-	public function fetchAllForUser($fk_user, $onlyenabled = false)
-	{
-		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX.$this->table_element;
-		$sql .= " WHERE fk_user = ".((int) $fk_user);
-		if ($onlyenabled) {
-			$sql .= " AND status = ".self::STATUS_ENABLED;
+		dol_include_once('/convomail/class/convomailunread.class.php');
+		dol_include_once('/convomail/lib/convomail.lib.php');
+		if (!ConvomailUnread::enabled() || ConvomailUnread::mode($user) === 'off') {
+			return 0;
 		}
-		$sql .= " AND entity IN (".getEntity($this->element).")";
-		$sql .= " ORDER BY is_default DESC, rowid ASC";
-
-		$resql = $this->db->query($sql);
-		if (!$resql) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		$list = array();
-		while ($obj = $this->db->fetch_object($resql)) {
-			$acc = new ConvomailAccount($this->db);
-			if ($acc->fetch((int) $obj->rowid) < 0) {
-				// Never show an account that failed to load as missing
-				$this->error = $acc->error ?: $this->db->lasterror();
-				return -1;
-			}
-			$list[] = $acc;
-		}
-		return $list;
-	}
-
-	/**
-	 * Count accounts of a user (badge on the user card tab)
-	 *
-	 * @param  int $fk_user User id
-	 * @return int          Number of accounts
-	 */
-	public function countForUser($fk_user)
-	{
-		$sql = "SELECT COUNT(rowid) as nb FROM ".MAIN_DB_PREFIX.$this->table_element;
-		$sql .= " WHERE fk_user = ".((int) $fk_user);
-		$sql .= " AND entity IN (".getEntity($this->element).")";
-		$resql = $this->db->query($sql);
-		if ($resql && ($obj = $this->db->fetch_object($resql))) {
-			return (int) $obj->nb;
-		}
+		$langs->load('convomail@convomail');
+		$contacts = (ConvomailUnread::mode($user) === 'contacts');
+		$texts = array(
+			'title'    => $langs->transnoentitiesnoconv($contacts ? 'ConvomailUnreadTitleContacts' : 'ConvomailUnreadTitleAll'),
+			'none'     => $langs->transnoentitiesnoconv($contacts ? 'ConvomailUnreadNoneContacts' : 'ConvomailUnreadNoneAll'),
+			'count'    => $langs->transnoentitiesnoconv($contacts ? 'ConvomailUnreadCountContacts' : 'ConvomailUnreadCountAll', '%s'),
+			'error'    => $langs->transnoentitiesnoconv('ConvomailUnreadError'),
+			'inbox'    => $langs->transnoentitiesnoconv('ConvomailUnreadOpenInbox'),
+			'settings' => $langs->transnoentitiesnoconv('ConvomailUnreadSettings'),
+			'more'     => $langs->transnoentitiesnoconv('ConvomailUnreadMore', '%s'),
+			'markall'  => $langs->transnoentitiesnoconv('ConvomailUnreadMarkAll'),
+			'marking'  => $langs->transnoentitiesnoconv('ConvomailUnreadMarking'),
+			'markconfirm' => $langs->transnoentitiesnoconv($contacts ? 'ConvomailUnreadMarkConfirmContacts' : 'ConvomailUnreadMarkConfirmAll', '%s'),
+		);
+		// The link sits in core's login_block_elem box, as core's own top bar icons do, so it lines up with them.
+		$h = '<div class="inline-block cm-topunread-wrap">';
+		$h .= '<div class="inline-block login_block_elem" style="padding: 0px; padding-right: 2px;">';
+		$h .= '<a class="cm-topunread login-dropdown-a nofocusvisible" href="'.dol_escape_htmltag(dol_buildpath('/convomail/mailbox.php', 1).'?role=inbox').'"';
+		$h .= ' data-url="'.dol_escape_htmltag(dol_buildpath('/convomail/ajax/unread.php', 1)).'" data-token="'.newToken().'"';
+		$h .= ' data-preview="'.(ConvomailUnread::preview($user) ? 1 : 0).'" data-interval="'.max(60, convomail_poll_interval() ?: 120).'"';
+		$h .= ' data-settings="'.dol_escape_htmltag(dol_buildpath('/convomail/user_accounts.php', 1).'?id='.((int) $user->id).'#cm-unread-settings').'"';
+		$h .= ' data-texts="'.dol_escape_htmltag(json_encode($texts)).'" title="'.dol_escape_htmltag($texts['title']).'" aria-haspopup="true" aria-expanded="false">';
+		$h .= '<span class="fa fa-envelope atoplogin valignmiddle"></span><span class="cm-topunread-count" hidden></span></a>';
+		$h .= '</div>';
+		$h .= '<div class="cm-topunread-menu" hidden></div>';
+		$h .= '</div>';
+		$h .= convomail_assets(array('/convomail/css/convomail-topbar.css'), array('/convomail/js/convomail-topbar.js'));
+		$this->resprints = $h;
 		return 0;
 	}
 
 	/**
-	 * Accounts a user may open: their own, then the shared mailboxes they were granted
+	 * Register the module's objects so getElementProperties() can resolve them
 	 *
-	 * @param  User $u           User
-	 * @param  bool $onlyenabled Only enabled accounts
-	 * @param  bool $sendable    Only accounts the user may send with
-	 * @return ConvomailAccount[]|int Array of accounts, <0 if KO
+	 * @param  array<string,mixed> $parameters Hook parameters
+	 * @param  CommonObject|null   $object     Object
+	 * @param  string              $action     Action
+	 * @param  HookManager         $hookmanager Hook manager
+	 * @return int                              0
 	 */
-	public function fetchAllUsableBy(User $u, $onlyenabled = true, $sendable = false)
+	public function getElementProperties($parameters, &$object, &$action, $hookmanager)
 	{
-		$list = $this->fetchAllForUser($u->id, $onlyenabled);
-		if (!is_array($list)) {
-			return -1;
+		$elementType = isset($parameters['elementType']) ? $parameters['elementType'] : '';
+
+		if ($elementType === 'convomailaccount' || $elementType === 'convomail_convomailaccount') {
+			$this->results = array(
+				'module'        => 'convomail',
+				'element'       => 'convomailaccount',
+				'table_element' => 'convomail_account',
+				'subelement'    => 'convomailaccount',
+				'classpath'     => 'convomail/class',
+				'classfile'     => 'convomailaccount',
+				'classname'     => 'ConvomailAccount',
+			);
+		} elseif ($elementType === 'convomailmessage' || $elementType === 'convomail_convomailmessage') {
+			$this->results = array(
+				'module'        => 'convomail',
+				'element'       => 'convomailmessage',
+				'table_element' => 'convomail_message',
+				'subelement'    => 'convomailmessage',
+				'classpath'     => 'convomail/class',
+				'classfile'     => 'convomailmessage',
+				'classname'     => 'ConvomailMessage',
+			);
 		}
-		$sql = "SELECT a.rowid FROM ".MAIN_DB_PREFIX.$this->table_element." as a";
-		$sql .= " WHERE a.fk_user IS NULL";
-		$sql .= " AND a.entity IN (".getEntity($this->element).")";
-		if ($onlyenabled) {
-			$sql .= " AND a.status = ".self::STATUS_ENABLED;
-		}
-		// Granted to the user or to one of their groups, at a level that lets them send when asked
-		$sql .= " AND EXISTS (SELECT g.rowid FROM ".MAIN_DB_PREFIX."convomail_account_access as g WHERE g.fk_account = a.rowid";
-		$sql .= " AND g.level >= ".($sendable ? self::LEVEL_SEND : self::LEVEL_READ);
-		$sql .= " AND (".self::granteeCondition('g', (int) $u->id)."))";
-		$sql .= " ORDER BY a.label, a.email";
-		$resql = $this->db->query($sql);
-		if (!$resql) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		while ($obj = $this->db->fetch_object($resql)) {
-			$acc = new ConvomailAccount($this->db);
-			if ($acc->fetch((int) $obj->rowid) < 0) {
-				$this->error = $acc->error ?: $this->db->lasterror();
-				return -1;
-			}
-			$list[] = $acc;
-		}
-		if ($sendable && !$u->hasRight('convomail', 'message', 'send')) {
-			return array();
-		}
-		return $list;
+
+		return 0;
 	}
 
 	/**
-	 * @return bool True for a shared mailbox (sales@, support@) used by the users granted access
-	 */
-	public function isShared()
-	{
-		// A new account has no owner yet (null): not shared until fk_user is set to 0
-		return $this->fk_user !== null && $this->fk_user !== '' && (int) $this->fk_user === self::SHARED_OWNER;
-	}
-
-	/**
-	 * Forget the levels read in this request (after a change of grants or of group members)
+	 * On the card of an email sent with convomail, show the receipt status (rows of the card's field table)
 	 *
-	 * @return void
+	 * @param  array<string,mixed> $parameters  Hook parameters
+	 * @param  CommonObject        $object      Object of the card
+	 * @param  string              $action      Action
+	 * @param  HookManager         $hookmanager Hook manager
+	 * @return int                              0
 	 */
-	public static function clearAccessCache()
+	public function formObjectOptions($parameters, &$object, &$action, $hookmanager)
 	{
-		self::$accessCache = array();
-	}
+		global $langs;
 
-	/**
-	 * SQL condition: the grant (alias) is the user's own or one of their groups'
-	 *
-	 * @param  string $alias  Alias of llx_convomail_account_access
-	 * @param  int    $userid User
-	 * @return string
-	 */
-	private static function granteeCondition($alias, $userid)
-	{
-		return $alias.".fk_user = ".((int) $userid)." OR ".$alias.".fk_usergroup IN (SELECT ugu.fk_usergroup FROM ".MAIN_DB_PREFIX."usergroup_user as ugu WHERE ugu.fk_user = ".((int) $userid).")";
-	}
+		$contexts = explode(':', isset($parameters['context']) ? $parameters['context'] : '');
+		if (!isModEnabled('convomail') || !in_array('actioncard', $contexts) || !is_object($object) || $object->element !== 'action' || empty($object->id)) {
+			return 0;
+		}
+		if (!empty($action) && $action !== 'view') {
+			return 0;
+		}
 
-	/**
-	 * Level of a user on this shared mailbox: the highest of their own grant and their groups' grants
-	 *
-	 * @param  User $u User
-	 * @return int     0 (none) to LEVEL_MANAGE
-	 */
-	public function level(User $u)
-	{
-		$key = ((int) $this->id).'-'.((int) $u->id);
-		if (!isset(self::$accessCache[$key])) {
-			self::$accessCache[$key] = 0;
-			$sql = "SELECT MAX(g.level) as level FROM ".MAIN_DB_PREFIX."convomail_account_access as g";
-			$sql .= " WHERE g.fk_account = ".((int) $this->id)." AND (".self::granteeCondition('g', (int) $u->id).")";
-			$resql = $this->db->query($sql);
-			if ($resql && $resql !== true) {
-				/** @var ?object{level:?string} $obj */
-				$obj = $this->db->fetch_object($resql);
-				self::$accessCache[$key] = $obj ? (int) $obj->level : 0;
-			}
+		dol_include_once('/convomail/class/convomailmessage.class.php');
+		$message = new ConvomailMessage($this->db);
+		if ($message->fetchByActioncomm($object->id) <= 0) {
+			return 0;
 		}
-		return self::$accessCache[$key];
-	}
 
-	/**
-	 * The grant of a user on this shared mailbox (their own or a group's), as what it allows
-	 *
-	 * @param  User $u User
-	 * @return array{level:int,read:bool,handle:bool,send:bool,manage:bool}
-	 */
-	public function accessOf(User $u)
-	{
-		$level = $this->level($u);
-		return array('level' => $level, 'read' => $level >= self::LEVEL_READ, 'handle' => $level >= self::LEVEL_HANDLE,
-			'send' => $level >= self::LEVEL_SEND, 'manage' => $level >= self::LEVEL_MANAGE);
-	}
+		$langs->load('convomail@convomail');
 
-	/**
-	 * May this user open the mailbox, read and file its messages?
-	 * Own account; a shared mailbox they were granted; any account for mail accounts admins.
-	 *
-	 * @param  User $u User
-	 * @return bool
-	 */
-	public function canRead(User $u)
-	{
-		return $this->readAccess($u) !== '';
-	}
-
-	/**
-	 * Why this user may read this account
-	 *
-	 * @param  User   $u User
-	 * @return string    'own', 'shared' (granted), 'all' (reads all users' mailboxes), 'hierarchy' (a subordinate's), '' if not allowed
-	 */
-	public function readAccess(User $u)
-	{
-		// Until the read right is split from the admin one (modConvomail::migrateReadRights()), admin still reads all
-		$readall = $u->hasRight('convomail', 'account', 'readall') || (!getDolGlobalInt('CONVOMAIL_RIGHTS_SPLIT') && $u->hasRight('convomail', 'account', 'admin'));
-		$readhierarchy = (bool) $u->hasRight('convomail', 'account', 'readhierarchy');
-		if (!$u->hasRight('convomail', 'account', 'read') && !$readall && !$readhierarchy) {
-			return '';
-		}
-		$owner = (int) $this->fk_user;
-		if (!$this->isShared() && $owner === (int) $u->id) {
-			return 'own';
-		}
-		if ($this->isShared() && $this->accessOf($u)['read']) {
-			return 'shared';
-		}
-		if ($readall) {
-			return 'all';
-		}
-		if ($readhierarchy && !$this->isShared() && in_array($owner, array_map('intval', $u->getAllChildIds()), true)) {
-			return 'hierarchy';
-		}
-		return '';
-	}
-
-	/**
-	 * May this user send as this account? Own account, or a shared mailbox granted with "send".
-	 * Admins need their own grant to send as a shared address.
-	 *
-	 * @param  User $u User
-	 * @return bool
-	 */
-	public function canSend(User $u)
-	{
-		if (!$u->hasRight('convomail', 'message', 'send')) {
-			return false;
-		}
-		if ((int) $this->fk_user === (int) $u->id) {
-			return true;
-		}
-		return $this->isShared() && $this->accessOf($u)['send'];
-	}
-
-	/**
-	 * May this user organise the messages: move, archive, delete, spam, flags? Own account; a shared mailbox granted
-	 * at least LEVEL_HANDLE; another user's mailbox read through a read right (as before levels existed).
-	 *
-	 * @param  User $u User
-	 * @return bool
-	 */
-	public function canHandle(User $u)
-	{
-		$why = $this->readAccess($u);
-		if ($why === 'shared') {
-			return $this->accessOf($u)['handle'];
-		}
-		return $why !== '';
-	}
-
-	/**
-	 * May this user change the account: folders, sign-in, automatic filing? The owner, a shared mailbox's users granted
-	 * LEVEL_MANAGE, or a mail accounts admin.
-	 *
-	 * @param  User $u User
-	 * @return bool
-	 */
-	public function canManage(User $u)
-	{
-		if ((int) $this->fk_user === (int) $u->id && !$this->isShared() && $u->hasRight('convomail', 'account', 'read')) {
-			return true;
-		}
-		if ($this->isShared() && $u->hasRight('convomail', 'account', 'read') && $this->accessOf($u)['manage']) {
-			return true;
-		}
-		return (bool) $u->hasRight('convomail', 'account', 'admin');
-	}
-
-	/**
-	 * Kept for callers written before shared mailboxes: same as canRead()
-	 *
-	 * @param  User $u User
-	 * @return bool
-	 */
-	public function canBeUsedBy(User $u)
-	{
-		return $this->canRead($u);
-	}
-
-	/**
-	 * Users and user groups granted this shared mailbox
-	 *
-	 * @return array<string,array{type:string,id:int,fk_user:int,level:int,can_send:int,name:string,login:string}>|int
-	 *         Keyed by 'u<user id>' or 'g<group id>', users first; <0 if KO
-	 */
-	public function fetchAccess()
-	{
-		$out = array();
-		$sql = "SELECT g.fk_user as id, g.level, u.login, u.firstname, u.lastname FROM ".MAIN_DB_PREFIX."convomail_account_access as g";
-		$sql .= " INNER JOIN ".MAIN_DB_PREFIX."user as u ON u.rowid = g.fk_user";
-		$sql .= " WHERE g.fk_account = ".((int) $this->id);
-		$sql .= " ORDER BY u.lastname, u.firstname, u.login";
-		$resql = $this->db->query($sql);
-		if (!$resql || $resql === true) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		while ($obj = $this->db->fetch_object($resql)) {
-			/** @var object{id:string,level:string,login:string,firstname:?string,lastname:?string} $obj */
-			$out['u'.((int) $obj->id)] = array('type' => 'user', 'id' => (int) $obj->id, 'fk_user' => (int) $obj->id, 'level' => (int) $obj->level,
-				'can_send' => ((int) $obj->level >= self::LEVEL_SEND) ? 1 : 0, 'name' => dolGetFirstLastname((string) $obj->firstname, (string) $obj->lastname), 'login' => $obj->login);
-		}
-		$sql = "SELECT g.fk_usergroup as id, g.level, ug.nom as name FROM ".MAIN_DB_PREFIX."convomail_account_access as g";
-		$sql .= " INNER JOIN ".MAIN_DB_PREFIX."usergroup as ug ON ug.rowid = g.fk_usergroup";
-		$sql .= " WHERE g.fk_account = ".((int) $this->id);
-		$sql .= " ORDER BY ug.nom";
-		$resql = $this->db->query($sql);
-		if (!$resql || $resql === true) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		while ($obj = $this->db->fetch_object($resql)) {
-			/** @var object{id:string,level:string,name:string} $obj */
-			$out['g'.((int) $obj->id)] = array('type' => 'group', 'id' => (int) $obj->id, 'fk_user' => 0, 'level' => (int) $obj->level,
-				'can_send' => ((int) $obj->level >= self::LEVEL_SEND) ? 1 : 0, 'name' => $obj->name, 'login' => '');
-		}
-		return $out;
-	}
-
-	/**
-	 * Grant (or change) the level of a user or a user group on this shared mailbox
-	 *
-	 * @param  string $type  'user' or 'group'
-	 * @param  int    $id    User or group id
-	 * @param  int    $level LEVEL_READ to LEVEL_MANAGE
-	 * @param  User   $by    User granting
-	 * @return int           >0 if OK, <0 if KO
-	 */
-	public function setGrant($type, $id, $level, User $by)
-	{
-		if (!$this->isShared() || (int) $id <= 0 || !in_array($type, array('user', 'group'), true) || $level < self::LEVEL_READ || $level > self::LEVEL_MANAGE) {
-			$this->error = 'BadParameter';
-			return -1;
-		}
-		self::$accessCache = array();
-		$cansend = ($level >= self::LEVEL_SEND) ? 1 : 0;
-		$resql = $this->db->query("SELECT rowid FROM ".MAIN_DB_PREFIX."convomail_account_access WHERE ".self::grantCondition((int) $this->id, $type, (int) $id));
-		if ($resql && $resql !== true && $this->db->num_rows($resql) > 0) {
-			$sql = "UPDATE ".MAIN_DB_PREFIX."convomail_account_access SET level = ".((int) $level).", can_send = ".((int) $cansend);
-			$sql .= " WHERE ".self::grantCondition((int) $this->id, $type, (int) $id);
+		$out = '<tr><td>'.$langs->trans('ConvomailReadReceiptRequested').'</td><td>'.yn($message->read_receipt).'</td></tr>';
+		$out .= '<tr><td>'.$langs->trans('ConvomailNbOpen').'</td><td>';
+		if (empty($message->track_key)) {
+			$out .= '<span class="opacitymedium">'.$langs->trans('ConvomailOpenTrackingNotUsed').'</span>';
 		} else {
-			$sql = "INSERT INTO ".MAIN_DB_PREFIX."convomail_account_access (entity, fk_account, fk_user, fk_usergroup, level, can_send, date_creation, fk_user_creat)";
-			$sql .= " VALUES (".((int) $this->entity).", ".((int) $this->id).", ".($type === 'user' ? (int) $id : 'NULL').", ".($type === 'group' ? (int) $id : 'NULL');
-			$sql .= ", ".((int) $level).", ".((int) $cansend).", '".$this->db->idate(dol_now())."', ".((int) $by->id).")";
+			dol_include_once('/convomail/class/convomailtracker.class.php');
+			$open = ConvomailTracker::openOf($this->db, $message);
+			$recent = ConvomailTracker::recentText($open);
+			$out .= '<span'.($open['count'] > 0 ? '' : ' class="opacitymedium"').($recent !== '' ? ' title="'.dol_escape_htmltag($recent, 0, 1).'"' : '').'>'.dol_escape_htmltag(ConvomailTracker::openText($open)).'</span>';
 		}
-		if (!$this->db->query($sql)) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		return 1;
-	}
+		$out .= '</td></tr>';
 
-	/**
-	 * SQL condition selecting one grant
-	 *
-	 * @param  int    $accountid Mailbox
-	 * @param  string $type      'user' or 'group'
-	 * @param  int    $id        User or group id
-	 * @return string
-	 */
-	private static function grantCondition($accountid, $type, $id)
-	{
-		if ($type === 'group') {
-			return "fk_account = ".((int) $accountid)." AND fk_usergroup = ".((int) $id);
-		}
-		return "fk_account = ".((int) $accountid)." AND fk_user = ".((int) $id);
-	}
-
-	/**
-	 * Remove the grant of a user or a user group on this shared mailbox
-	 *
-	 * @param  string $type 'user' or 'group'
-	 * @param  int    $id   User or group id
-	 * @return int          >0 if OK, <0 if KO
-	 */
-	public function removeGrant($type, $id)
-	{
-		self::$accessCache = array();
-		$sql = "DELETE FROM ".MAIN_DB_PREFIX."convomail_account_access WHERE ".self::grantCondition((int) $this->id, $type, (int) $id);
-		if (!$this->db->query($sql)) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		return 1;
-	}
-
-	/**
-	 * Turn this personal mailbox into a shared one, in place: same account (password or OAuth token, automatic
-	 * filing, logged emails, read receipts and open tracking stay), its owner granted LEVEL_MANAGE
-	 *
-	 * @param  User $by User doing it (a mail accounts admin)
-	 * @return int      >0 if OK, <0 if KO (see $this->error)
-	 */
-	public function makeShared(User $by)
-	{
-		$owner = (int) $this->fk_user;
-		if ($this->isShared() || $owner <= 0 || (int) $this->id <= 0) {
-			$this->error = 'ConvomailNotPersonal';
-			return -1;
-		}
-		$this->db->begin();
-		if (!$this->db->query("UPDATE ".MAIN_DB_PREFIX.$this->table_element." SET fk_user = NULL, is_default = 0, fk_user_modif = ".((int) $by->id)." WHERE rowid = ".((int) $this->id))) {
-			$this->error = $this->db->lasterror();
-			$this->db->rollback();
-			return -1;
-		}
-		$this->fk_user = self::SHARED_OWNER;
-		$this->is_default = 0;
-		if ($this->setGrant('user', $owner, self::LEVEL_MANAGE, $by) < 0) {
-			$this->db->rollback();
-			return -1;
-		}
-		$this->db->commit();
-		self::clearSessionCache();
-		$this->syncCollectorOwner($by);
-		dol_syslog(__METHOD__.' account '.$this->id.' of user '.$owner.' made shared by '.$by->id, LOG_NOTICE);
-		return 1;
-	}
-
-	/**
-	 * Turn this shared mailbox back into the personal mailbox of its only user: possible when exactly one user, and
-	 * no group, has access. Their grant goes; the account and everything kept with it stay.
-	 *
-	 * @param  User $by User doing it (a mail accounts admin)
-	 * @return int      >0 if OK, <0 if KO (see $this->error)
-	 */
-	public function makePersonal(User $by)
-	{
-		$access = $this->isShared() ? $this->fetchAccess() : -1;
-		if (!is_array($access)) {
-			$this->error = 'ConvomailNotShared';
-			return -1;
-		}
-		$userid = $this->onlyUser($access);
-		if ($userid <= 0) {
-			$this->error = 'ConvomailMakePersonalOneUser';
-			return -1;
-		}
-		$this->db->begin();
-		$ok = $this->db->query("UPDATE ".MAIN_DB_PREFIX.$this->table_element." SET fk_user = ".((int) $userid).", fk_user_modif = ".((int) $by->id)." WHERE rowid = ".((int) $this->id))
-			&& $this->db->query("DELETE FROM ".MAIN_DB_PREFIX."convomail_account_access WHERE fk_account = ".((int) $this->id));
-		if (!$ok) {
-			$this->error = $this->db->lasterror();
-			$this->db->rollback();
-			return -1;
-		}
-		$this->db->commit();
-		$this->fk_user = $userid;
-		self::$accessCache = array();
-		self::clearSessionCache();
-		$this->syncCollectorOwner($by);
-		dol_syslog(__METHOD__.' account '.$this->id.' made personal for user '.$userid.' by '.$by->id, LOG_NOTICE);
-		return 1;
-	}
-
-	/**
-	 * Its user is leaving: the personal mailbox is blocked now (disabled, automatic filing off) and deleted after a
-	 * period, by the scheduled job (cronDeleteLeaving()), as data protection authorities ask for a departed employee's
-	 * named mailbox. Each step is recorded in the security events.
-	 *
-	 * @param  User $by   User doing it (a mail accounts admin)
-	 * @param  int  $days Days until deletion (1 to 90)
-	 * @return int        >0 if OK, <0 if KO (see $this->error)
-	 */
-	public function markLeaving(User $by, $days)
-	{
-		if ($this->isShared() || (int) $this->id <= 0 || $days < 1 || $days > 90) {
-			$this->error = 'ConvomailLeavingNotPossible';
-			return -1;
-		}
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
-		$deleteon = dol_time_plus_duree(dol_now(), (int) $days, 'd');
-		$sql = "UPDATE ".MAIN_DB_PREFIX.$this->table_element." SET status = ".self::STATUS_DISABLED.", date_delete = '".$this->db->idate($deleteon)."', fk_user_modif = ".((int) $by->id);
-		$sql .= " WHERE rowid = ".((int) $this->id);
-		if (!$this->db->query($sql)) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		$this->status = self::STATUS_DISABLED;
-		$this->date_delete = $deleteon;
-		self::clearSessionCache();
-		if (isModEnabled('emailcollector')) {
-			dol_include_once('/convomail/class/convomailcollector.class.php');
-			(new ConvomailCollector($this->db))->disable($this, $by);
-		}
-		$this->audit($by, 'CONVOMAIL_ACCOUNT_LEAVING', 'ConvomailLeavingLog', dol_print_date($deleteon, 'day'));
-		return 1;
-	}
-
-	/**
-	 * Undo markLeaving(): no deletion date, enabled again (automatic filing stays off until turned on)
-	 *
-	 * @param  User $by User doing it
-	 * @return int      >0 if OK, <0 if KO
-	 */
-	public function cancelLeaving(User $by)
-	{
-		$sql = "UPDATE ".MAIN_DB_PREFIX.$this->table_element." SET status = ".self::STATUS_ENABLED.", date_delete = NULL, fk_user_modif = ".((int) $by->id);
-		$sql .= " WHERE rowid = ".((int) $this->id);
-		if (!$this->db->query($sql)) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		$this->status = self::STATUS_ENABLED;
-		$this->date_delete = null;
-		self::clearSessionCache();
-		$this->audit($by, 'CONVOMAIL_ACCOUNT_LEAVING', 'ConvomailLeavingCancelLog', '');
-		return 1;
-	}
-
-	/**
-	 * Scheduled job: delete the mailboxes whose deletion date has come (their user left). Logged emails stay in the
-	 * agenda as the company's records.
-	 *
-	 * @return int 0 if OK, <0 if KO (as core's scheduled jobs expect); what was done is in $this->output
-	 */
-	public function cronDeleteLeaving()
-	{
-		/** @var User $user */
-		global $user;
-
-		$this->output = '';
-		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX.$this->table_element;
-		$sql .= " WHERE date_delete IS NOT NULL AND date_delete <= '".$this->db->idate(dol_now())."' AND status = ".self::STATUS_DISABLED;
-		$sql .= " AND entity IN (".getEntity($this->element).")";
-		$resql = $this->db->query($sql);
-		if (!$resql || $resql === true) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		$ids = array();
-		while ($obj = $this->db->fetch_object($resql)) {
-			/** @var object{rowid:string} $obj */
-			$ids[] = (int) $obj->rowid;
-		}
-		$done = 0;
-		foreach ($ids as $id) {
-			$account = new ConvomailAccount($this->db);
-			if ($account->fetch($id) <= 0) {
-				continue;
-			}
-			if ($account->delete($user) <= 0) {
-				$this->error = $account->error;
-				return -1;
-			}
-			$account->audit($user, 'CONVOMAIL_ACCOUNT_DELETED', 'ConvomailLeavingDeletedLog', '');
-			$done++;
-		}
-		$this->output = $done.' mailbox(es) of users who left deleted';
+		$this->resprints = $out;
 		return 0;
 	}
 
 	/**
-	 * Record a step about this mailbox in Dolibarr's security events
+	 * Add buttons in the action bar of cards.
+	 * Note: core prints nothing from ->resprints for this hook, so buttons are printed directly
+	 * inside the page's tabsAction div, as core-compatible modules do.
 	 *
-	 * @param  User   $by    User
-	 * @param  string $type  Event type
-	 * @param  string $key   Translation key of the description (%1 mailbox, %2 account id, %3 extra)
-	 * @param  string $extra Extra value
-	 * @return void
+	 * @param  array<string,mixed> $parameters  Hook parameters
+	 * @param  CommonObject        $object      Object of the card
+	 * @param  string              $action      Action
+	 * @param  HookManager         $hookmanager Hook manager
+	 * @return int                              0
 	 */
-	private function audit(User $by, $type, $key, $extra)
+	public function addMoreActionsButtons($parameters, &$object, &$action, $hookmanager)
 	{
 		/** @var Translate $langs */
-		global $langs;
+		/** @var User $user */
+		global $langs, $user;
 
-		require_once DOL_DOCUMENT_ROOT.'/core/class/events.class.php';
-		$langs->load('convomail@convomail');
-		$event = new Events($this->db);
-		$event->type = $type;
-		$event->dateevent = dol_now();
-		$event->description = $langs->transnoentitiesnoconv($key, (string) $this->email, (string) $this->id, $extra);
-		if ($event->create($by) <= 0) {
-			dol_syslog(__METHOD__.' '.$event->error, LOG_WARNING);
-		}
-	}
-
-	/**
-	 * The only user with access to this shared mailbox, when there is exactly one user and no group
-	 *
-	 * @param  array<string,array{type:string,id:int}>|null $access fetchAccess() result (read again when null)
-	 * @return int                                                 User id, 0 if none or more than one
-	 */
-	public function onlyUser($access = null)
-	{
-		if ($access === null) {
-			$access = $this->fetchAccess();
-		}
-		if (!is_array($access) || count($access) !== 1) {
+		if (!isModEnabled('convomail') || !is_object($object) || empty($object->id) || (!empty($action) && $action !== 'view')) {
 			return 0;
 		}
-		$grant = reset($access);
-		return ($grant['type'] === 'user') ? (int) $grant['id'] : 0;
-	}
-
-	/**
-	 * The automatic filing collectors follow a change between personal and shared
-	 *
-	 * @param  User $by User
-	 * @return void
-	 */
-	private function syncCollectorOwner(User $by)
-	{
-		if (!isModEnabled('emailcollector')) {
-			return;
-		}
-		dol_include_once('/convomail/class/convomailcollector.class.php');
-		$collectors = new ConvomailCollector($this->db);
-		if ($collectors->syncOwner($this, $by) < 0) {
-			dol_syslog(__METHOD__.' account '.$this->id.': '.$collectors->error, LOG_WARNING);
-		}
-	}
-
-	/**
-	 * Grant (or change) a user's access, as before levels: read, file and organise, or also send
-	 *
-	 * @param  int  $userid  User
-	 * @param  bool $cansend Also send as the shared address
-	 * @param  User $by      User granting
-	 * @return int           >0 if OK, <0 if KO
-	 * @deprecated Use setGrant()
-	 */
-	public function setAccess($userid, $cansend, User $by)
-	{
-		return $this->setGrant('user', (int) $userid, $cansend ? self::LEVEL_SEND : self::LEVEL_HANDLE, $by);
-	}
-
-	/**
-	 * Remove a user's access to this shared mailbox
-	 *
-	 * @param  int $userid User
-	 * @return int         >0 if OK, <0 if KO
-	 * @deprecated Use removeGrant()
-	 */
-	public function removeAccess($userid)
-	{
-		return $this->removeGrant('user', (int) $userid);
-	}
-
-	/**
-	 * All accounts, personal and shared, for the admin dashboard
-	 *
-	 * @return ConvomailAccount[]|int Array of accounts, <0 if KO
-	 */
-	public function fetchAllAccounts()
-	{
-		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX.$this->table_element;
-		$sql .= " WHERE entity IN (".getEntity($this->element).")";
-		$sql .= " ORDER BY CASE WHEN fk_user IS NULL THEN 0 ELSE 1 END, email";
-		$resql = $this->db->query($sql);
-		if (!$resql) {
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-		$list = array();
-		while ($obj = $this->db->fetch_object($resql)) {
-			$acc = new ConvomailAccount($this->db);
-			if ($acc->fetch((int) $obj->rowid) < 0) {
-				$this->error = $acc->error ?: $this->db->lasterror();
-				return -1;
-			}
-			$list[] = $acc;
-		}
-		return $list;
-	}
-
-	/**
-	 * Check both hosts against the admin allowlist.
-	 * Allowlist set: host must match one pattern (* wildcard).
-	 * Allowlist empty: host must resolve to public addresses only.
-	 *
-	 * @return bool
-	 */
-	public function checkHostAllowed()
-	{
-		global $langs;
-
-		foreach (array('imap_host', 'smtp_host') as $field) {
-			$host = strtolower(trim((string) $this->$field));
-			if (!self::isHostAllowed($host)) {
-				$this->error = $langs->trans('ConvomailErrorHostNotAllowed', $host);
-				$this->errors[] = $this->error;
-				return false;
-			}
-		}
-		return true;
-	}
-
-	/**
-	 * Host patterns of the "Allowed mail servers" setting. Separated by line breaks, commas or spaces; also by a
-	 * literal "\n": up to 0.8.1 the setup page showed line breaks that way, and saving it again stored them so.
-	 *
-	 * @param  string   $value Setting value
-	 * @return string[]        Lowercase patterns
-	 */
-	public static function allowedHostPatterns($value)
-	{
-		return array_values(array_unique(preg_split('/(?:\\\\[rn]|[\s,;])+/', strtolower(trim((string) $value)), -1, PREG_SPLIT_NO_EMPTY) ?: array()));
-	}
-
-	/**
-	 * @param  string $host Host name or IP
-	 * @return bool
-	 */
-	public static function isHostAllowed($host)
-	{
-		if ($host === '' || !preg_match('/^[a-z0-9.\-]+$/', $host)) {
-			return false;
-		}
-
-		$patterns = self::allowedHostPatterns(getDolGlobalString('CONVOMAIL_ALLOWED_HOSTS'));
-		if (!empty($patterns)) {
-			foreach ($patterns as $pattern) {
-				$regex = '/^'.str_replace('\*', '.*', preg_quote(strtolower($pattern), '/')).'$/';
-				if (preg_match($regex, $host)) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		// No allowlist: every address the name resolves to (IPv4 and IPv6) must be public
-		$ips = filter_var($host, FILTER_VALIDATE_IP) ? array($host) : self::resolveHost($host);
-		if (empty($ips)) {
-			return false;
-		}
-		foreach ($ips as $ip) {
-			if (!self::isPublicIp($ip)) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	/**
-	 * Addresses of a host name: A and AAAA records (one CNAME followed), and the system resolver for IPv4
-	 * (it also reads /etc/hosts)
-	 *
-	 * @param  string   $host Host name
-	 * @return string[]
-	 */
-	private static function resolveHost($host)
-	{
-		$ips = gethostbynamel($host) ?: array();
-		$names = array($host);
-		$records = @dns_get_record($host, DNS_A | DNS_AAAA | DNS_CNAME) ?: array();
-		foreach ($records as $r) {
-			if (($r['type'] ?? '') === 'CNAME' && !empty($r['target'])) {
-				$names[] = (string) $r['target'];
-			}
-		}
-		foreach (array_unique($names) as $i => $name) {
-			$list = $i === 0 ? $records : (@dns_get_record($name, DNS_A | DNS_AAAA) ?: array());
-			foreach ($list as $r) {
-				if (!empty($r['ip'])) {
-					$ips[] = (string) $r['ip'];
-				}
-				if (!empty($r['ipv6'])) {
-					$ips[] = (string) $r['ipv6'];
-				}
-			}
-		}
-		return array_values(array_unique($ips));
-	}
-
-	/**
-	 * Whether an address is on the public internet: not private, loopback, link-local, CGNAT, documentation,
-	 * benchmark, multicast or reserved, for IPv4 and IPv6 (IPv4 inside IPv6, mapped or NAT64, is checked as IPv4)
-	 *
-	 * @param  string $ip Address
-	 * @return bool
-	 */
-	public static function isPublicIp($ip)
-	{
-		$bin = @inet_pton((string) $ip);
-		if ($bin === false) {
-			return false;
-		}
-		if (strlen($bin) === 16) {
-			// ::ffff:a.b.c.d and 64:ff9b::a.b.c.d carry an IPv4 address
-			if (substr($bin, 0, 12) === str_repeat("\0", 10)."\xff\xff" || substr($bin, 0, 12) === "\x00\x64\xff\x9b".str_repeat("\0", 8)) {
-				return self::isPublicIp((string) inet_ntop(substr($bin, 12)));
-			}
-			$blocked = array('::/127', '::ffff:0:0/96', '100::/64', '2001::/23', '2001:db8::/32', 'fc00::/7', 'fe80::/10', 'fec0::/10', 'ff00::/8');
-		} else {
-			$blocked = array('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24',
-				'192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4');
-		}
-		foreach ($blocked as $cidr) {
-			if (self::ipInRange($ip, $cidr)) {
-				return false;
-			}
-		}
-		return (bool) filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
-	}
-
-	/**
-	 * Whether an address is in a range: "203.0.113.0/24", "2001:db8::/32", or a single address (all its bits)
-	 *
-	 * @param  string $ip   Address
-	 * @param  string $cidr Range
-	 * @return bool         False for anything malformed, and between IPv4 and IPv6
-	 */
-	public static function ipInRange($ip, $cidr)
-	{
-		$bin = @inet_pton((string) $ip);
-		$parts = explode('/', trim((string) $cidr), 2);
-		$netbin = @inet_pton($parts[0]);
-		if ($bin === false || $netbin === false || strlen($netbin) !== strlen($bin)) {
-			return false;
-		}
-		$max = strlen($bin) * 8;
-		$bits = isset($parts[1]) ? $parts[1] : (string) $max;
-		if (!ctype_digit($bits) || (int) $bits > $max) {
-			return false;
-		}
-		$bytes = intdiv((int) $bits, 8);
-		$rest = (int) $bits % 8;
-		if (substr($bin, 0, $bytes) !== substr($netbin, 0, $bytes)) {
-			return false;
-		}
-		return $rest === 0 || ((ord($bin[$bytes]) ^ ord($netbin[$bytes])) & (0xff << (8 - $rest)) & 0xff) === 0;
-	}
-
-	/**
-	 * Name and address of the account for a dropdown, e.g. "Sales Team — sales@example.com (shared)".
-	 * No angle brackets: Dolibarr's dropdowns render option text as HTML, where "<sales@...>" would vanish as a tag.
-	 *
-	 * @return string Plain text (escape before printing)
-	 */
-	public function choiceLabel()
-	{
-		global $langs;
-
-		$label = trim((string) $this->label);
-		$out = ($label !== '' && strcasecmp($label, (string) $this->email) !== 0) ? $label.' — '.$this->email : (string) $this->email;
-		if ($this->isShared()) {
-			$out .= ' ('.$langs->transnoentitiesnoconv('ConvomailShared').')';
-		}
-		return $out;
-	}
-
-	/**
-	 * Page where the account is managed: the owner's Mail accounts tab, or the admin dashboard for a shared mailbox
-	 *
-	 * @return string Relative URL
-	 */
-	public function cardUrl()
-	{
-		if ($this->isShared()) {
-			return dol_buildpath('/convomail/accounts.php', 1).'?accountid='.((int) $this->id);
-		}
-		return dol_buildpath('/convomail/user_accounts.php', 1).'?id='.((int) $this->fk_user).'&accountid='.((int) $this->id);
-	}
-
-	/**
-	 * @param  int    $withpicto 1 = add picto
-	 * @param  string $option    Unused
-	 * @param  int    $notooltip Unused
-	 * @return string            HTML link to the user's mail accounts tab
-	 */
-	public function getNomUrl($withpicto = 0, $option = '', $notooltip = 0)
-	{
-		$url = $this->cardUrl();
-		$label = dol_escape_htmltag($this->label ? $this->label : $this->email);
-		$result = '<a href="'.$url.'" title="'.$label.'">';
-		if ($withpicto) {
-			$result .= img_picto('', $this->picto, 'class="pictofixedwidth"');
-		}
-		return $result.$label.'</a>';
-	}
-
-	/**
-	 * @param  int    $mode 0=long label, 1=short label, 2-6=picto variants
-	 * @return string
-	 */
-	public function getLibStatut($mode = 0)
-	{
-		return $this->LibStatut($this->status, $mode);
-	}
-
-	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
-	/**
-	 * @param  int    $status Status
-	 * @param  int    $mode   Display mode
-	 * @return string
-	 */
-	public function LibStatut($status, $mode = 0)
-	{
-		// phpcs:enable
-		global $langs;
+		$contexts = explode(':', isset($parameters['context']) ? $parameters['context'] : '');
 		$langs->load('convomail@convomail');
-		$label = $status == self::STATUS_ENABLED ? $langs->transnoentitiesnoconv('Enabled') : $langs->transnoentitiesnoconv('Disabled');
-		$statustype = $status == self::STATUS_ENABLED ? 'status4' : 'status5';
-		return dolGetStatus($label, $label, '', $statustype, $mode);
+
+		// Third party and contact cards: the person's emails kept in Dolibarr, for data protection requests (export,
+		// erase), for admins only, as core's Data privacy module
+		if ((in_array('thirdpartycard', $contexts) && $object instanceof Societe) || (in_array('contactcard', $contexts) && $object instanceof Contact)) {
+			if (isModEnabled('agenda') && !empty($user->admin) && empty($user->socid)) {
+				$url = dol_buildpath('/convomail/personal_emails.php', 1).'?type='.($object instanceof Contact ? 'contact' : 'societe').'&id='.((int) $object->id);
+				print dolGetButtonAction('', $langs->trans('ConvomailPersonalEmails'), 'default', $url, '', true);
+			}
+		}
+
+		if (!$user->hasRight('convomail', 'message', 'send')) {
+			return 0;
+		}
+		$compose = dol_buildpath('/convomail/compose.php', 1);
+
+		// Third party, contact and project cards already have core's "Send email" button: no second one here.
+		// Sending that form through the user's mailbox is planned (docs/ROADMAP.md, "Core's Send email through the user's mailbox").
+		if (in_array('actioncard', $contexts) && $object instanceof ActionComm) {
+			if (!empty($object->email_msgid) && in_array($object->type_code, array('AC_EMAIL', 'AC_EMAILIN_AUTO', 'AC_OTH_AUTO'))) {
+				print dolGetButtonAction('', $langs->trans('ConvomailReply'), 'default', $compose.'?replyto='.((int) $object->id), '', true);
+			}
+		}
+
+		return 0;
 	}
 }
