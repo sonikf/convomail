@@ -14,861 +14,2041 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
- * Email templates (fill subject and body above the signature/quote), project contact chips (add to To / Cc),
- * address suggestions while typing in To / Cc / Bcc (jQuery UI autocomplete, as elsewhere in Dolibarr),
- * and the AI writing tools of core's AI module.
+ * Mailbox behaviour: open a message in the reading pane, actions (read, flag, move, archive, delete, spam,
+ * log to project), the "From this email" panel, selection and keyboard shortcuts. Also sizes the sandboxed message iframe; the iframe
+ * itself never runs scripts.
  */
-
+ 
 (function () {
 	'use strict';
 
-	function field(name) { return document.querySelector('[name="' + name + '"]'); }
+	function qs(sel, root) { return (root || document).querySelector(sel); }
+	function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
-	function addAddress(name, addr) {
-		var input = field(name);
-		if (!input) {
-			return;
-		}
-		var current = input.value.trim();
-		var bare = (addr.match(/<([^>]+)>/) || [null, addr])[1].toLowerCase();
-		if (current.toLowerCase().indexOf(bare) !== -1) {
-			return;
-		}
-		input.value = current ? current.replace(/,\s*$/, '') + ', ' + addr : addr;
-	}
-
-	function bindChips(box) {
-		box.addEventListener('click', function (ev) {
-			var chip = ev.target.closest('.cm-chip');
-			if (!chip) {
-				return;
-			}
-			ev.preventDefault();
-			addAddress(ev.target.closest('[data-cc]') ? 'sendtocc' : 'sendto', chip.getAttribute('data-addr'));
-		});
-	}
-
-	function renderChips(box, list) {
-		box.textContent = '';
-		list.forEach(function (c) {
-			var addr = c.name ? c.name + ' <' + c.email + '>' : c.email;
-			var chip = document.createElement('span');
-			chip.className = 'cm-chip';
-			chip.setAttribute('data-addr', addr);
-			chip.title = c.role || c.email;
-			chip.appendChild(document.createTextNode(c.name || c.email));
-			var cc = document.createElement('a');
-			cc.href = '#';
-			cc.setAttribute('data-cc', '1');
-			cc.textContent = box.getAttribute('data-cc-label');
-			chip.appendChild(cc);
-			box.appendChild(chip);
-		});
-	}
-
-	function editorData() {
-		if (window.CKEDITOR && CKEDITOR.instances.message) {
-			return CKEDITOR.instances.message.getData();
-		}
-		var ta = field('message');
-		return ta ? ta.value : '';
-	}
-
-	function setEditorData(html) {
-		if (window.CKEDITOR && CKEDITOR.instances.message) {
-			CKEDITOR.instances.message.setData(html);
-		} else if (field('message')) {
-			field('message').value = html;
-		}
-	}
-
-	function normalized(text) {
-		return (text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-	}
-
-	/**
-	 * The editor content split into what the user typed and what follows: the signature ("-- " line) or the quoted
-	 * message (its intro line). The editor drops the classes and the blockquote put there by the server, so these
-	 * two texts are what is left to find them by.
-	 */
-	function splitBody(html, intro) {
-		var box = document.createElement('div');
-		box.innerHTML = html;
-		var nodes = Array.prototype.slice.call(box.childNodes);
-		var stop = nodes.length;
-		for (var i = 0; i < nodes.length; i++) {
-			var n = nodes[i];
-			var text = normalized(n.textContent);
-			if (n.nodeType === 1 && (/^--( |$)/.test(text) || n.tagName === 'BLOCKQUOTE' || (intro && text.indexOf(intro) === 0))) {
-				stop = i;
-				break;
-			}
-		}
-		var typed = document.createElement('div');
-		var rest = document.createElement('div');
-		nodes.forEach(function (n, i) { (i < stop ? typed : rest).appendChild(n); });
-		return { typed: typed, rest: rest };
-	}
-
-	// AI output is HTML from a remote service: keep the content only, nothing that runs or would trip core's injection filter
-	function cleanAiHtml(html) {
-		html = String(html || '').trim().replace(/^```(?:html)?\s*/i, '').replace(/\s*```$/, '');
-		var doc = new DOMParser().parseFromString(html, 'text/html');
-		Array.prototype.forEach.call(doc.querySelectorAll('script, style, iframe, object, embed, form, link, meta, title'), function (el) { el.remove(); });
-		Array.prototype.forEach.call(doc.body.querySelectorAll('*'), function (el) {
-			Array.prototype.slice.call(el.attributes).forEach(function (a) {
-				if (/^on/i.test(a.name) || a.name === 'contenteditable' || a.name === 'style' || /^\s*javascript:/i.test(a.value)) {
-					el.removeAttribute(a.name);
-				}
-			});
-		});
-		var section = doc.body.querySelector('section');
-		return (section && normalized(section.textContent) === normalized(doc.body.textContent) ? section.innerHTML : doc.body.innerHTML).trim();
-	}
-
-	/**
-	 * AI writing tools (core's AI module, ai/ajax/generate_content.php): write from a prompt, or rephrase,
-	 * shorten or translate the typed text. Only the typed part changes; signature and quote stay as they are.
-	 */
-	function bindAiTools(panel) {
-		var $ = window.jQuery;
-		var prompt = document.getElementById('cm-ai-prompt');
-		var write = document.getElementById('cm-ai-write');
-		var status = document.getElementById('cm-ai-status');
-		var intro = normalized(panel.getAttribute('data-intro'));
-		var busy = false;
-
-		document.getElementById('cm-ai-toggle').addEventListener('click', function (ev) {
-			ev.preventDefault();
-			panel.classList.toggle('hideobject');
-			if (!panel.classList.contains('hideobject')) {
-				prompt.focus();
-			}
-		});
-		prompt.addEventListener('input', function () { write.disabled = busy || !prompt.value.trim(); });
-		prompt.addEventListener('keydown', function (ev) {
-			if (ev.key === 'Enter' && !ev.shiftKey && prompt.value.trim()) {
-				ev.preventDefault();
-				write.click();
-			}
-		});
-
-		function say(text, error) {
-			status.textContent = text;
-			status.classList.toggle('error', !!error);
-			status.classList.toggle('hideobject', !text);
-		}
-
-		function run(fn, instructions, parts) {
-			busy = true;
-			write.disabled = true;
-			panel.classList.add('cm-ai-busy');
-			say(panel.getAttribute('data-wait'), false);
-			var editor = window.CKEDITOR && CKEDITOR.instances.message;
-			fetch(panel.getAttribute('data-url'), {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ format: 'html', 'function': fn, instructions: instructions })
-			}).then(function (r) {
-				return r.text().then(function (text) { return { ok: r.ok, text: text }; });
-			}).then(function (res) {
-				// Core answers 200 with its error text when the provider can't be reached (UPSTREAM item 15)
-				var failed = !res.ok || /^\s*(Error\b|Quota or allowed period exceeded)/.test(res.text);
-				var html = failed ? '' : cleanAiHtml(res.text);
-				if (!html) {
-					// Parsed in an inert document: markup in the error text never runs
-					var box = new DOMParser().parseFromString(res.text, 'text/html').body;
-					throw new Error(normalized(box.textContent) || 'Error');
-				}
-				var rest = parts.rest.innerHTML.trim();
-				var previous = editorData();
-				setEditorData(html + (rest ? '<p>&nbsp;</p>' + rest : ''));
-				prompt.value = '';
-				// The editor's own undo can't step back over setData(): offer an explicit one
-				say(panel.getAttribute('data-done') + ' ', false);
-				var undo = document.createElement('a');
-				undo.href = '#';
-				undo.textContent = panel.getAttribute('data-undo');
-				undo.addEventListener('click', function (ev) {
-					ev.preventDefault();
-					setEditorData(previous);
-					say('', false);
-				});
-				status.appendChild(undo);
-			}).catch(function (e) {
-				say(e.message, true);
-			}).then(function () {
-				busy = false;
-				write.disabled = !prompt.value.trim();
-				panel.classList.remove('cm-ai-busy');
-			});
-		}
-
-		write.addEventListener('click', function () {
-			var ask = prompt.value.trim();
-			if (!ask || busy) {
-				return;
-			}
-			var parts = splitBody(editorData(), intro);
-			var draft = normalized(parts.typed.textContent);
-			var instructions = ask;
-			if (draft) {
-				instructions += '\n\nUse and improve this draft:\n' + parts.typed.innerHTML;
-			}
-			if (panel.getAttribute('data-mode') !== 'new' && panel.getAttribute('data-quote')) {
-				instructions += '\n\nThis email ' + (panel.getAttribute('data-mode') === 'forward' ? 'forwards' : 'answers') + ' the message below. Do not repeat it.\n'
-					+ panel.getAttribute('data-intro') + '\n' + panel.getAttribute('data-quote');
-			}
-			instructions += '\n\nWrite only the body text: no subject line and no signature, they are added separately.';
-			run('textgenerationemail', instructions, parts);
-		});
-
-		function onChoice(id, fn, build) {
-			var sel = document.getElementById(id);
-			if (!sel || !$) {
-				return;
-			}
-			$(sel).on('change', function () {
-				var value = sel.value;
-				if (!value || value === '-1' || value === '0' || busy) {
-					return;
-				}
-				var parts = splitBody(editorData(), intro);
-				if (!normalized(parts.typed.textContent)) {
-					say(panel.getAttribute('data-empty'), true);
-				} else {
-					run(fn, build(value, parts.typed.innerHTML), parts);
-				}
-				$(sel).val('-1').trigger('change.select2');
-			});
-		}
-		// Same instructions as core's mail form (core/class/html.formai.class.php)
-		onChoice('cm_ai_rephrase', 'textrephraser', function (style, text) {
-			return 'Rephrase the following text in a ' + style + ' style: ' + text;
-		});
-		onChoice('cm_ai_summarize', 'textsummarize', function (value, text) {
-			var p = value.split('_');
-			var unit = { w: 'words', p: 'paragraphs', pc: 'percent' }[p[1]] || 'words';
-			return 'Summarize the following text ' + (unit === 'percent' ? 'by ' : 'in ') + p[0] + ' ' + unit + ': ' + text;
-		});
-		onChoice('cm_ai_translate', 'texttranslation', function (lang, text) {
-			return 'Translate only the following text to ' + lang + ': ' + text;
-		});
-	}
-
-	// The part of an address list being typed: after the last comma that is not inside quotes
-	function lastTerm(value) {
-		var inquote = false, start = 0;
-		for (var i = 0; i < value.length; i++) {
-			if (value[i] === '"') { inquote = !inquote; }
-			if (value[i] === ',' && !inquote) { start = i + 1; }
-		}
-		return { head: value.slice(0, start), term: value.slice(start).replace(/^\s+/, '') };
-	}
-
-	function bindAddressAutocomplete(input) {
-		var $ = window.jQuery;
-		if (!$ || !$.fn.autocomplete) {
-			return;
-		}
-		var url = input.getAttribute('data-cm-addresses');
-		var only = input.getAttribute('data-cm-only') || '';
-		// The user fields list every employee from the first click; the other fields wait for two letters
-		var minimum = only ? 0 : 2;
-		var kinds = {};
-		try { kinds = JSON.parse(input.getAttribute('data-cm-kinds') || '{}'); } catch (e) { kinds = {}; }
-		$(input).on('keydown', function (ev) {
-			// Tab picks the highlighted suggestion instead of leaving the field
-			var inst = $(this).autocomplete('instance');
-			if (ev.keyCode === $.ui.keyCode.TAB && inst && inst.menu.active) {
-				ev.preventDefault();
-			}
-		}).on('click', function () {
-			if (only && !$(this).autocomplete('widget').is(':visible')) {
-				$(this).autocomplete('search', this.value);
-			}
-		}).autocomplete({
-			minLength: minimum,
-			delay: 200,
-			source: function (request, response) {
-				var split = lastTerm(request.term);
-				if (split.term.length < minimum) {
-					response([]);
-					return;
-				}
-				$.getJSON(url, only ? { term: split.term, only: only } : { term: split.term }).done(function (data) {
-					data = Array.isArray(data) ? data : [];
-					// Users already in the field are not offered again: whole addresses, so anick@ doesn't hide nick@
-					var picked = split.head.toLowerCase().match(/[^\s<>,;"']+@[^\s<>,;"']+/g) || [];
-					response(only ? data.filter(function (d) { return d.kind === 'more' || picked.indexOf(String(d.email).toLowerCase()) === -1; }) : data);
-				}).fail(function () { response([]); });
-			},
-			focus: function () { return false; },
-			select: function (ev, ui) {
-				if (ui.item.kind === 'more') {
-					return false;
-				}
-				// Replace what was typed with the chosen address, ready for the next one
-				var head = lastTerm(this.value).head.replace(/\s*$/, '');
-				this.value = head + (head ? ' ' : '') + ui.item.value + ', ';
-				this.dispatchEvent(new Event('input', { bubbles: true }));
-				return false;
-			}
-		});
-		$(input).autocomplete('widget').addClass('cm-ac-menu');
-		$(input).autocomplete('instance')._renderItem = function (ul, item) {
-			if (item.kind === 'more') {
-				// Not an address: a hint that typing narrows the list
-				return $('<li class="ui-state-disabled cm-ac-more">').text(input.getAttribute('data-cm-more') || '').appendTo(ul);
-			}
-			// Built from text nodes: names and addresses come from the database
-			var row = $('<div class="cm-ac-item">');
-			row.append($('<span class="cm-ac-name">').text(item.name || item.email));
-			if (item.name) {
-				row.append($('<span class="cm-ac-email">').text(item.email));
-			}
-			var extra = [kinds[item.kind] || '', item.detail || ''].filter(Boolean).join(' · ');
-			if (extra) {
-				row.append($('<span class="cm-ac-kind">').text(extra));
-			}
-			return $('<li>').append(row).appendTo(ul);
-		};
-	}
-
-	document.addEventListener('DOMContentLoaded', function () {
-		document.querySelectorAll('input[data-cm-addresses]').forEach(bindAddressAutocomplete);
-
-		// The browser stops a send without recipient or subject before anything leaves: the server refuses it too,
-		// but its answer is a new page, and picked files can't be put back in a file field. Cancel skips the check.
-		var subject = field('subject');
-		if (subject && subject.form) {
-			[field('sendto'), subject].forEach(function (input) {
-				if (input) {
-					input.required = true;
-					input.pattern = '.*\\S.*';	// not just spaces
-				}
-			});
-			subject.form.querySelectorAll('[name="cancel"]').forEach(function (b) { b.formNoValidate = true; });
-			// To may stay empty when another recipient field has someone (Cc- or Bcc-only mail)
-			var to = field('sendto');
-			var others = ['sendtouser', 'sendtocc', 'sendtoccuser', 'sendtobcc', 'sendtobccuser'].map(field).filter(Boolean);
-			if (to && others.length) {
-				var syncRequired = function () {
-					to.required = !others.some(function (input) { return input.value.trim() !== ''; });
-				};
-				others.forEach(function (input) {
-					input.addEventListener('input', syncRequired);
-					input.addEventListener('change', syncRequired);
-				});
-				syncRequired();
-			}
-		}
-
-		var chips = document.getElementById('cm-projectcontacts');
-		if (chips) {
-			bindChips(chips);
-			var reload = function (projectid) {
-				if (!projectid || projectid === '-1' || projectid === '0') {
-					chips.textContent = '';
-					return;
-				}
-				fetch(chips.getAttribute('data-url') + '?id=' + encodeURIComponent(projectid), { credentials: 'same-origin' })
-					.then(function (r) { return r.ok ? r.json() : []; })
-					.then(function (list) { renderChips(chips, list || []); });
-			};
-			// The project selector may be a select2: listen through jQuery when present
-			if (window.jQuery) {
-				jQuery(document).on('change', '#projectid', function () { reload(this.value); });
-			} else if (document.getElementById('projectid')) {
-				document.getElementById('projectid').addEventListener('change', function () { reload(this.value); });
-			}
-		}
-
-		// Files picked from Dolibarr with the Document Browser module (optional): chips holding dbfile[] keys
-		var dbbtn = document.getElementById('cm-docbrowser');
-		var dbbox = document.getElementById('cm-dbfiles');
-		if (dbbtn && dbbox && window.DocBrowser) {
-			var picked = [];
-			var renderPicked = function () {
-				dbbox.textContent = '';
-				var total = 0;
-				picked.forEach(function (f, i) {
-					total += f.size || 0;
-					var chip = document.createElement('span');
-					chip.className = 'cm-chip cm-dbchip';
-					chip.title = f.record || f.name;
-					var icon = document.createElement('span');
-					icon.className = 'fa fa-' + (f.icon || 'file') + ' pictofixedwidth';
-					chip.appendChild(icon);
-					chip.appendChild(document.createTextNode(f.name + ' (' + f.sizetext + ')'));
-					var input = document.createElement('input');
-					input.type = 'hidden';
-					input.name = 'dbfile[]';
-					input.value = f.key;
-					chip.appendChild(input);
-					var x = document.createElement('a');
-					x.href = '#';
-					x.textContent = '×';
-					x.title = dbbox.getAttribute('data-remove');
-					x.addEventListener('click', function (ev) {
-						ev.preventDefault();
-						picked.splice(i, 1);
-						renderPicked();
-					});
-					chip.appendChild(x);
-					dbbox.appendChild(chip);
-				});
-				if (window.DocBrowser.maxBytes > 0 && total > window.DocBrowser.maxBytes) {
-					var note = document.createElement('div');
-					note.className = 'opacitymedium';
-					note.textContent = dbbox.getAttribute('data-overlimit');
-					dbbox.appendChild(note);
-				}
-			};
-			try { picked = JSON.parse(dbbox.getAttribute('data-files') || '[]') || []; } catch (e) { picked = []; }
-			renderPicked();
-			dbbtn.addEventListener('click', function () {
-				var project = document.getElementById('projectid');
-				window.DocBrowser.open({
-					// Read when the dialog opens, so a third party or project chosen on the form is used
-					context: function () {
-						return {
-							socid: (field('socid') || {}).value || '',
-							contactid: (field('contactid') || {}).value || '',
-							projectid: project ? project.value : '',
-							origin: (field('origin') || {}).value || '',
-							originid: (field('originid') || {}).value || ''
-						};
-					},
-					onPick: function (files) {
-						files.forEach(function (f) {
-							if (!picked.some(function (p) { return p.key === f.key; })) {
-								picked.push(f);
-							}
-						});
-						renderPicked();
-					}
-				});
-			});
-		}
-
-		/**
-		 * Files dragged in from the computer, anywhere on the page or into the editor's text: an overlay says what a
-		 * drop will do. Images dropped on the text go in it at the drop point (as pasted images do, up to 2 MB each);
-		 * every other file, and anything dropped elsewhere on the page, goes to add() as an attachment. A drop that
-		 * misses never makes the browser open the file (and leave the draft). Drags that start in the page itself
-		 * (an image moved inside the text) are left alone.
-		 */
-		function watchDrops(add, labels) {
-			var INLINE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-			var INLINE_MAX = 2097152;
-			var overlay = null;
-			var box = null;
-			var hideTimer = null;
-			var internal = false;
-			if (add) {
-				overlay = document.createElement('div');
-				overlay.className = 'cm-drop-overlay';
-				overlay.setAttribute('aria-hidden', 'true');
-				box = document.createElement('div');
-				box.className = 'cm-drop-overlay-box';
-				overlay.appendChild(box);
-				document.body.appendChild(overlay);
-			}
-			var hasFiles = function (ev) {
-				return !internal && ev.dataTransfer && Array.prototype.indexOf.call(ev.dataTransfer.types || [], 'Files') !== -1;
-			};
-			// While dragging, only the types are known (not the sizes): "into the text" when every item is an image
-			var allImages = function (ev) {
-				var items = ev.dataTransfer.items;
-				if (!items || !items.length) {
-					return false;
-				}
-				return Array.prototype.every.call(items, function (it) { return it.kind === 'file' && INLINE_TYPES.indexOf(it.type) !== -1; });
-			};
-			var hide = function () {
-				if (overlay) {
-					overlay.classList.remove('cm-drop-on');
-				}
-			};
-			// Put the editor's caret where the files were dropped, so the images land there
-			var caretAtDrop = function (ed, ev) {
-				var doc = ed.document.$;
-				var native = null;
-				if (doc.caretRangeFromPoint) {
-					native = doc.caretRangeFromPoint(ev.clientX, ev.clientY);
-				} else if (doc.caretPositionFromPoint) {
-					var pos = doc.caretPositionFromPoint(ev.clientX, ev.clientY);
-					if (pos) {
-						native = { startContainer: pos.offsetNode, startOffset: pos.offset };
-					}
-				}
-				if (!native || !native.startContainer) {
-					return;
-				}
-				try {
-					var range = ed.createRange();
-					range.setStart(new CKEDITOR.dom.node(native.startContainer), native.startOffset);
-					range.collapse(true);
-					ed.getSelection().selectRanges([range]);
-				} catch (e) { /* at the caret it had */ }
-			};
-			var insertImages = function (ed, files) {
-				files.forEach(function (f) {
-					var reader = new FileReader();
-					reader.onload = function () {
-						var img = new CKEDITOR.dom.element('img', ed.document);
-						img.setAttribute('src', String(reader.result));
-						img.setAttribute('alt', f.name);
-						ed.insertElement(img);
-					};
-					reader.readAsDataURL(f);
-				});
-			};
-			var watch = function (doc, ed) {
-				if (!doc || doc.cmDropWatched) {
-					return;
-				}
-				doc.cmDropWatched = true;
-				doc.addEventListener('dragstart', function () { internal = true; }, true);
-				doc.addEventListener('dragend', function () { internal = false; }, true);
-				doc.addEventListener('dragover', function (ev) {
-					if (!hasFiles(ev)) {
-						return;
-					}
-					ev.preventDefault();
-					ev.stopPropagation();
-					ev.dataTransfer.dropEffect = add ? 'copy' : 'none';
-					if (overlay) {
-						// Shown while files are over the page or the editor, gone a moment after they leave both
-						box.textContent = (ed && allImages(ev)) ? labels.inline : labels.attach;
-						overlay.classList.add('cm-drop-on');
-						clearTimeout(hideTimer);
-						hideTimer = setTimeout(hide, 250);
-					}
-				}, true);
-				doc.addEventListener('drop', function (ev) {
-					if (hasFiles(ev)) {
-						ev.preventDefault();
-						ev.stopPropagation();	// before the editor's own drop handling
-						hide();
-						var files = Array.prototype.slice.call(ev.dataTransfer.files || []);
-						if (add && ed) {
-							var inline = files.filter(function (f) { return INLINE_TYPES.indexOf(f.type) !== -1 && f.size <= INLINE_MAX; });
-							if (inline.length) {
-								caretAtDrop(ed, ev);
-								insertImages(ed, inline);
-							}
-							files = files.filter(function (f) { return inline.indexOf(f) === -1; });
-						}
-						if (add && files.length) {
-							add(files);
-						}
-					}
-					internal = false;
-				}, true);
-			};
-			watch(document, null);
-			// The editor's text is a document of its own (an iframe), made again when switching to source and back
-			if (window.CKEDITOR) {
-				var hook = function (ed) {
-					ed.on('contentDom', function () { watch(ed.document && ed.document.$, ed); });
-					if (ed.status === 'ready' && ed.document) {
-						watch(ed.document.$, ed);
-					}
-				};
-				Object.keys(CKEDITOR.instances).forEach(function (k) { hook(CKEDITOR.instances[k]); });
-				CKEDITOR.on('instanceCreated', function (e) { hook(e.editor); });
-			}
-		}
-
-		// Files from the computer: a chip each (name, size, x), added across picks instead of replacing them, and
-		// files dropped anywhere on the page (watchDrops()); the chosen ones are put back in the field, which the form sends
-		var upInput = document.getElementById('cm-upload');
-		var upBtn = document.getElementById('cm-upload-btn');
-		var upBox = document.getElementById('cm-uploads');
-		var canSet = false;
+	function fit(frame) {
 		try {
-			canSet = typeof DataTransfer === 'function' && !!new DataTransfer().files;
-		} catch (e) { canSet = false; }
-		if (upInput && upBtn && upBox && canSet) {
-			var chosen = [];
-			var limit = parseInt(upBox.getAttribute('data-max'), 10) || 0;
-			var sizeText = function (b) {
-				return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
-			};
-			var sync = function () {
-				var dt = new DataTransfer();
-				chosen.forEach(function (f) { dt.items.add(f); });
-				upInput.files = dt.files;
-			};
-			var renderUploads = function () {
-				upBox.textContent = '';
-				var total = 0;
-				chosen.forEach(function (f, i) {
-					total += f.size;
-					var chip = document.createElement('span');
-					chip.className = 'cm-chip cm-dbchip cm-upchip';
-					chip.title = f.name;
-					var icon = document.createElement('span');
-					icon.className = 'fa fa-paperclip pictofixedwidth';
-					chip.appendChild(icon);
-					chip.appendChild(document.createTextNode(f.name + ' (' + sizeText(f.size) + ')'));
-					var x = document.createElement('a');
-					x.href = '#';
-					x.textContent = '\u00d7';
-					x.title = upBox.getAttribute('data-remove');
-					x.addEventListener('click', function (ev) {
-						ev.preventDefault();
-						chosen.splice(i, 1);
-						sync();
-						renderUploads();
-					});
-					chip.appendChild(x);
-					upBox.appendChild(chip);
-				});
-				if (limit > 0 && total > limit) {
-					var note = document.createElement('div');
-					note.className = 'warning';
-					note.textContent = upBox.getAttribute('data-overlimit');
-					upBox.appendChild(note);
-				}
-			};
-			var add = function (list) {
-				Array.prototype.forEach.call(list || [], function (f) {
-					if (!chosen.some(function (c) { return c.name === f.name && c.size === f.size && c.lastModified === f.lastModified; })) {
-						chosen.push(f);
-					}
-				});
-				sync();
-				renderUploads();
-			};
-			upInput.classList.add('cm-upload-field');
-			upBtn.hidden = false;
-			upBtn.addEventListener('click', function () { upInput.click(); });
-			// The browser replaces the field's files on each pick: keep the earlier ones
-			upInput.addEventListener('change', function () { add(upInput.files); });
-			watchDrops(add, { attach: upBox.getAttribute('data-drop'), inline: upBox.getAttribute('data-drop-inline') });
-		} else if (upInput) {
-			watchDrops(null, {});	// no chips here: a dropped file just never makes the browser leave the draft
-		}
-
-		var tpl = document.getElementById('cm-template');
-		if (tpl) {
-			loadMailboxTemplates(tpl);
-			var account = field('accountid');
-			if (account) {
-				account.addEventListener('change', function () { loadMailboxTemplates(tpl); });
-				if (window.jQuery) {
-					jQuery(account).on('select2:select', function () { loadMailboxTemplates(tpl); });
-				}
+			var doc = frame.contentDocument;
+			if (doc && doc.body) {
+				frame.style.height = (Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight) + 24) + 'px';
 			}
-			tpl.addEventListener('change', function () {
-				if (!tpl.value) {
-					return;
-				}
-				var chosen = tpl.options[tpl.selectedIndex];
-				if (chosen && chosen.getAttribute('data-uid')) {
-					openMailboxTemplate(tpl, chosen);
-					return;
-				}
-				var project = document.getElementById('projectid');
-				var plain = tpl.getAttribute('data-plain') === '1';
-				var params = '?id=' + encodeURIComponent(tpl.value)
-					+ '&socid=' + encodeURIComponent((field('socid') || {}).value || '')
-					+ '&contactid=' + encodeURIComponent((field('contactid') || {}).value || '')
-					+ '&projectid=' + encodeURIComponent(project ? project.value : '')
-					+ '&origin=' + encodeURIComponent(tpl.getAttribute('data-origin') || '')
-					+ '&originid=' + encodeURIComponent(tpl.getAttribute('data-originid') || '')
-					+ (plain ? '&plain=1' : '');
-				fetch(tpl.getAttribute('data-url') + params, { credentials: 'same-origin' })
-					.then(function (r) { return r.json(); })
-					.then(function (data) {
-						if (!data || !data.ok) {
+		} catch (e) {
+			frame.style.height = '600px';
+		}
+	}
+
+	/**
+	 * Compose URL for a mailto: link (to, cc, bcc, subject, body), or '' if it names nobody
+	 */
+	function composeFromMailto(href, base) {
+		var m = /^mailto:([^?]*)(?:\?(.*))?$/i.exec(href.trim());
+		if (!m) {
+			return '';
+		}
+		var dec = function (s) {
+			try { return decodeURIComponent(s.replace(/\+/g, '%2B')); } catch (e) { return s; }
+		};
+		var fields = { to: [dec(m[1])], cc: [], bcc: [], subject: '', body: '' };
+		(m[2] || '').split('&').forEach(function (pair) {
+			var eq = pair.indexOf('=');
+			var key = (eq < 0 ? pair : pair.slice(0, eq)).toLowerCase();
+			var value = eq < 0 ? '' : dec(pair.slice(eq + 1));
+			if (key === 'to' || key === 'cc' || key === 'bcc') {
+				fields[key].push(value);
+			} else if (key === 'subject' || key === 'body') {
+				fields[key] = value;
+			}
+		});
+		var list = function (a) { return a.join(',').split(',').map(function (s) { return s.trim(); }).filter(Boolean).join(', '); };
+		if (!list(fields.to) && !list(fields.cc) && !list(fields.bcc)) {
+			return '';
+		}
+		var params = { sendto: list(fields.to), sendtocc: list(fields.cc), sendtobcc: list(fields.bcc), subject: fields.subject };
+		if (fields.body) {
+			var esc = document.createElement('div');
+			esc.textContent = fields.body;
+			params.message = '<p>' + esc.innerHTML.replace(/\r?\n/g, '<br>') + '</p>';
+		}
+		var url = base;
+		Object.keys(params).forEach(function (k) {
+			if (params[k]) {
+				url += '&' + k + '=' + encodeURIComponent(params[k]);
+			}
+		});
+		return url;
+	}
+
+	function bindFrames(root) {
+		qsa('iframe.convomail-body', root).forEach(function (frame) {
+			var onload = function () {
+				fit(frame);
+				// mailto: links open Convomail's compose page; with Shift (or another modifier) the computer's mail app
+				var doc = frame.contentDocument;
+				if (doc && !doc.cmMailto && frame.getAttribute('data-compose')) {
+					doc.cmMailto = true;
+					doc.addEventListener('click', function (ev) {
+						var a = ev.target.closest ? ev.target.closest('a[href]') : null;
+						if (!a || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || ev.button !== 0) {
 							return;
 						}
-						// A reply or a forward keeps its subject (Re: / Fwd:), as the thread needs it
-						if (data.subject && field('subject') && tpl.getAttribute('data-keepsubject') !== '1') {
-							field('subject').value = data.subject;
+						var url = /^\s*mailto:/i.test(a.getAttribute('href')) ? composeFromMailto(a.getAttribute('href'), frame.getAttribute('data-compose')) : '';
+						if (url) {
+							ev.preventDefault();
+							window.location.href = url;
 						}
-						// Put the template above what is there (signature, quoted message), dropping a leading empty line.
-						// Searching for the signature markup is unreliable: the editor rewrites it.
-						var current = plain
-							? editorData().replace(/^\s*\n/, '')
-							: editorData().replace(/^\s*<p>(\s|&nbsp;|<br\s*\/?>)*<\/p>\s*/i, '');
-						setEditorData(plain ? data.body.replace(/\s+$/, '') + '\n\n' + current : data.body + current);
-						// A template that joins files ticks the record's document, as on the record's own form
-						var maindoc = document.getElementById('cm-maindoc');
-						if (maindoc && data.joinfiles) {
-							maindoc.checked = true;
-						}
-						tpl.value = '';
 					});
+				}
+				var imgs = frame.contentDocument ? frame.contentDocument.images : [];
+				for (var j = 0; j < imgs.length; j++) {
+					imgs[j].addEventListener('load', function () { fit(frame); });
+				}
+			};
+			frame.addEventListener('load', onload);
+			if (frame.contentDocument && frame.contentDocument.readyState === 'complete') {
+				onload();
+			}
+		});
+	}
+
+	function notify(text, ok) {
+		if (!text) {
+			return;
+		}
+		// Plain text: older Dolibarr (20) shows the notice's HTML as tags. Parsed apart from the page (nothing loads or runs)
+		text = new DOMParser().parseFromString(String(text).replace(/<br\s*\/?>/gi, ' '), 'text/html').body.textContent.trim();
+		// Dolibarr's own notice tool where it exists (Dolibarr 25: it follows the instance's notification setup), else jnotify
+		if (window.Dolibarr && Dolibarr.tools && typeof Dolibarr.tools.setEventMessage === 'function') {
+			Dolibarr.tools.setEventMessage(text, ok ? 'mesgs' : 'errors', !ok);
+		} else if (window.jQuery && jQuery.jnotify) {
+			jQuery.jnotify(text, ok ? 'ok' : 'error', ok ? 3000 : true);
+		} else if (!ok) {
+			window.alert(text);
+		}
+	}
+
+	/**
+	 * Conversation under a message (ajax/thread.php): loaded after the message, later messages opened
+	 */
+	function loadThread(root) {
+		var slot = qs('.cm-conv-slot', root);
+		if (!slot) {
+			return;
+		}
+		fetch(slot.getAttribute('data-url'), { credentials: 'same-origin' })
+			.then(function (r) { return r.ok ? r.text() : ''; })
+			.then(function (html) {
+				if (!slot.isConnected) {
+					return;	// another message was opened meanwhile
+				}
+				slot.innerHTML = html;
+				slot.parentNode.classList.toggle('cm-has-conv', html.trim() !== '');
+				qsa('.cm-conv-item.cm-autoopen', slot).forEach(function (item) { openThreadItem(item, false); });
+			})
+			.catch(function () { /* the conversation is optional */ });
+	}
+
+	function openThreadItem(item, showimages) {
+		var body = qs('.cm-conv-body', item);
+		if (!body) {
+			return;
+		}
+		if (item.classList.contains('open') && !showimages) {
+			item.classList.remove('open');
+			return;
+		}
+		item.classList.add('open');
+		if (body.getAttribute('data-loaded') && !showimages) {
+			return;
+		}
+		item.classList.add('loading');
+		fetch(item.getAttribute('data-body') + (showimages ? '&showimages=1' : ''), { credentials: 'same-origin' })
+			.then(function (r) { return r.text(); })
+			.then(function (html) {
+				item.classList.remove('loading');
+				body.innerHTML = html;
+				body.setAttribute('data-loaded', '1');
+				bindFrames(body);
 			});
-		}
+	}
 
-		var aipanel = document.getElementById('cm-ai-panel');
-		if (aipanel) {
-			bindAiTools(aipanel);
+	document.addEventListener('click', function (ev) {
+		var images = ev.target.closest('[data-cm-conv-images]');
+		if (images) {
+			ev.preventDefault();
+			openThreadItem(images.closest('.cm-conv-item'), true);
+			return;
 		}
-
-		bindSaves();
+		var head = ev.target.closest('.cm-conv-item[data-body] .cm-conv-head');
+		if (head && !ev.target.closest('a')) {
+			openThreadItem(head.parentNode, false);
+		}
 	});
 
-	// Templates of the From mailbox (its Templates folder), listed under Dolibarr's own; the row shows when there is any
-	function loadMailboxTemplates(tpl) {
-		var account = field('accountid');
-		var old = tpl.querySelector('optgroup[data-mailbox]');
-		if (old) {
-			old.remove();
+	/**
+	 * "From this email" panel (ajax/record.php): opens under the buttons of the message, in the reading pane and
+	 * in the full-page view. Native inputs only; the third party and record pickers search ajax/records.php.
+	 */
+	function recordLine(el) {
+		var view = el.closest('.cm-view');
+		return view ? qs('.cm-recordline', view) : null;
+	}
+
+	function closeRecordPanel(view) {
+		var slot = qs('.cm-recordpanel', view);
+		if (slot) {
+			slot.innerHTML = '';
+			slot.removeAttribute('data-type');
 		}
-		showTemplateRow(tpl);
-		if (!account || !account.value) {
-			return;
+		qsa('.cm-recordline .cm-active', view).forEach(function (b) { b.classList.remove('cm-active'); });
+	}
+
+	function closeCreateMenus(except) {
+		qsa('.cm-createmenu .cm-menu:not([hidden])').forEach(function (menu) {
+			if (menu !== except) {
+				menu.hidden = true;
+				qs('[data-cm-createmenu]', menu.parentNode).setAttribute('aria-expanded', 'false');
+			}
+		});
+	}
+
+	/**
+	 * Open the panel of a type ('file' or a record kind) under the buttons; extra: query string to add (kind switch).
+	 * busy: the button that asked for it (Fill from the invoice, Read with AI): the panel stays on screen, locked, with
+	 * a status line under that button until the new one arrives, and comes back as it was if that fails.
+	 */
+	function openRecordPanel(view, type, extra, busy) {
+		var line = qs('.cm-recordline', view);
+		var slot = qs('.cm-recordpanel', view);
+		var status = busy ? startBusy(busy) : null;
+		if (!status) {
+			closeRecordPanel(view);
 		}
-		var accountid = account.value;
-		fetch(tpl.getAttribute('data-url') + '?accountid=' + encodeURIComponent(accountid), { credentials: 'same-origin' })
-			.then(function (r) { return r.json(); })
-			.then(function (data) {
-				if (!data || !data.ok || !data.templates || !data.templates.length || account.value !== accountid) {
+		// A button of the line (File, Link) or the Create menu, for a kind picked in it
+		var opener = qs(':scope > [data-cm-record="' + type + '"]', line) || qs('[data-cm-createmenu]', line);
+		if (opener) {
+			opener.classList.add('cm-active');
+		}
+		slot.setAttribute('data-type', type);
+		if (!status) {
+			slot.classList.add('loading');
+		}
+		var url = line.getAttribute('data-url') + '&action=panel&type=' + encodeURIComponent(type)
+			+ '&token=' + encodeURIComponent(line.getAttribute('data-token')) + (extra || '');
+		fetch(url, { credentials: 'same-origin' })
+			.then(function (r) { return r.ok ? r.text() : Promise.reject(new Error(r.status)); })
+			.then(function (html) {
+				slot.classList.remove('loading');
+				if (status) {
+					status.stop();
+				}
+				if (slot.getAttribute('data-type') !== type || !slot.isConnected) {
+					return;	// closed, another panel or another message opened meanwhile
+				}
+				slot.innerHTML = html;
+				var form = qs('form.cm-rp', slot);
+				var submit = qs('.cm-rp-submit', form);
+				if (submit && submit.getAttribute('data-warned')) {
+					form.elements.acceptwarnings.value = '1';	// warnings shown from the start: the button says "anyway"
+				}
+				var first = qsa('.cm-rp-label.fieldrequired', form).map(function (l) {
+					return qs('.cm-rp-value input:not([type="hidden"])', l.closest('.cm-rp-row'));
+				}).filter(function (i) { return i && !i.value; })[0];
+				(first || qs('input:not([type="hidden"]), button', form)).focus({ preventScroll: true });
+				slot.scrollIntoView({ block: 'nearest' });
+			})
+			.catch(function () {
+				slot.classList.remove('loading');
+				if (status) {
+					status.fail();	// the panel as it was, with the error under the button
 					return;
 				}
-				var group = document.createElement('optgroup');
-				group.label = tpl.getAttribute('data-mailbox-label');
-				group.setAttribute('data-mailbox', accountid);
-				data.templates.forEach(function (t) {
-					var o = document.createElement('option');
-					o.value = 'mailbox:' + t.uid;
-					o.textContent = t.subject || '…';
-					o.setAttribute('data-uid', t.uid);
-					o.setAttribute('data-folder', data.folder);
-					o.setAttribute('data-account', accountid);
-					group.appendChild(o);
-				});
-				tpl.appendChild(group);
-				showTemplateRow(tpl);
-			})
-			.catch(function () { /* no templates offered: the mailbox may be unreachable, compose still works */ });
-	}
-
-	function showTemplateRow(tpl) {
-		var row = document.getElementById('cm-template-row');
-		if (row) {
-			row.classList.toggle('hidden', tpl.options.length <= 1);
-		}
-	}
-
-	// A template saved from this page is offered in the list at once, under Dolibarr's templates
-	function addSavedTemplate(template) {
-		var tpl = document.getElementById('cm-template');
-		if (!tpl || !template || !template.id || tpl.querySelector('option[value="' + template.id + '"]')) {
-			return;
-		}
-		var group = tpl.querySelector('optgroup[data-dolibarr]');
-		if (!group) {
-			group = document.createElement('optgroup');
-			group.label = tpl.getAttribute('data-dolibarr-label');
-			group.setAttribute('data-dolibarr', '1');
-			tpl.insertBefore(group, tpl.querySelector('optgroup[data-mailbox]'));
-		}
-		var o = document.createElement('option');
-		o.value = template.id;
-		o.textContent = template.label;
-		group.appendChild(o);
-		showTemplateRow(tpl);
-	}
-
-	// A template of the mailbox opens as a new email (its text, recipients and attachments), with the page's records
-	function openMailboxTemplate(tpl, chosen) {
-		var typed = (field('subject') && field('subject').value.trim() !== '')
-			|| editorData().replace(/<div class="convomail-signature"[\s\S]*$/i, '').replace(/<[^>]+>|&nbsp;|\s/g, '') !== '';
-		if (typed && !window.confirm(tpl.getAttribute('data-confirm'))) {
-			tpl.value = '';
-			return;
-		}
-		var project = document.getElementById('projectid');
-		var params = {
-			mode: 'template', srcaccountid: chosen.getAttribute('data-account'), accountid: chosen.getAttribute('data-account'),
-			folder: chosen.getAttribute('data-folder'), uid: chosen.getAttribute('data-uid'),
-			socid: (field('socid') || {}).value || '', contactid: (field('contactid') || {}).value || '',
-			projectid: project ? project.value : '', origin: (field('origin') || {}).value || '',
-			originid: (field('originid') || {}).value || '', replyto: (field('replyto') || {}).value || ''
-		};
-		var query = Object.keys(params).filter(function (k) { return params[k] !== '' && params[k] !== '0'; })
-			.map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
-		window.location.href = tpl.getAttribute('data-compose') + '?' + query;
-	}
-
-	// Save draft and Save as template: the form is posted in the background, so it stays as it is with its files.
-	// A draft saved again replaces the previous one (the page keeps its place in draftaccountid/draftfolder/draftuid),
-	// except an opened draft, whose page reloads on the new one. A template goes to the user's Dolibarr templates.
-	function bindSaves() {
-		var box = document.querySelector('.cm-compose-buttons');
-		var status = document.getElementById('cm-save-status');
-		if (!box || !status || typeof FormData !== 'function' || typeof fetch !== 'function') {
-			return;	// the buttons post the form; the page then opens what was saved
-		}
-		var form = box.closest('form');
-		var show = function (lines, isError) {
-			status.textContent = '';
-			status.className = 'cm-save-status ' + (isError ? 'error' : 'opacitymedium');
-			(lines || []).forEach(function (line, i) {
-				if (i) {
-					status.appendChild(document.createElement('br'));
-				}
-				// Messages come as HTML from the server's translations: shown as text
-				var tmp = document.createElement('div');
-				tmp.innerHTML = line;
-				status.appendChild(document.createTextNode(tmp.textContent));
+				closeRecordPanel(view);
+				notify('Error', false);
 			});
+	}
+
+	/**
+	 * Lock a panel while the server works for one of its buttons: the form dimmed and not clickable, the button
+	 * disabled with a spinner, a status line under it (data-cm-busy) with the seconds elapsed after a few.
+	 * Returns {stop, fail}: fail() unlocks the form and says it did not work (data-cm-busy-failed).
+	 */
+	function startBusy(button) {
+		var form = button.closest('form.cm-rp');
+		if (!form) {
+			return null;
+		}
+		qsa('.cm-rp-busy', form).forEach(function (old) { old.remove(); });	// a failure line of an earlier try
+		// Its own block of the form (not dimmed), just above the part holding the button
+		var block = button;
+		while (block.parentNode && block.parentNode !== form) {
+			block = block.parentNode;
+		}
+		var line = document.createElement('div');
+		line.className = 'cm-rp-busy';
+		line.setAttribute('role', 'status');
+		line.setAttribute('aria-live', 'polite');
+		var spin = document.createElement('span');
+		spin.className = 'cm-spinner';
+		spin.setAttribute('aria-hidden', 'true');
+		var text = document.createElement('span');
+		var label = button.getAttribute('data-cm-busy') || '…';
+		text.textContent = label;
+		line.appendChild(spin);
+		line.appendChild(text);
+		form.insertBefore(line, block.parentNode === form ? block : null);
+		line.scrollIntoView({ block: 'nearest' });
+		form.classList.add('loading', 'cm-rp-working');
+		form.setAttribute('aria-busy', 'true');
+		button.disabled = true;
+		button.classList.add('cm-btn-working');
+		var started = Date.now();
+		var timer = setInterval(function () {
+			var secs = Math.round((Date.now() - started) / 1000);
+			if (secs >= 3) {
+				text.textContent = label + ' ' + secs + ' s';
+			}
+		}, 1000);
+		function unlock() {
+			clearInterval(timer);
+			form.classList.remove('loading', 'cm-rp-working');
+			form.removeAttribute('aria-busy');
+			button.disabled = false;
+			button.classList.remove('cm-btn-working');
+		}
+		return {
+			stop: function () {
+				unlock();
+				line.remove();
+			},
+			fail: function () {
+				unlock();
+				spin.remove();
+				line.classList.add('cm-rp-busy-failed');
+				text.textContent = button.getAttribute('data-cm-busy-failed') || 'Error';
+			}
 		};
-		box.querySelectorAll('button[name="cmsave"]').forEach(function (btn) {
-			btn.addEventListener('click', function (ev) {
-				// An opened draft saved again is replaced, and its attachments are offered from it: the page then opens
-				// the new draft instead (a normal post)
-				var mode = form.querySelector('[name="mode"]');
-				if (btn.value === 'draft' && mode && mode.value === 'draft') {
+	}
+
+	function recordMessages(form, res) {
+		var box = qs('.cm-rp-msgs', form);
+		var html = '';
+		(res.errors || (res.error ? [res.error] : [])).forEach(function (e) { html += '<div class="error">' + e + '</div>'; });
+		(res.warnings || []).forEach(function (w) { html += '<div class="warning">' + w + '</div>'; });
+		box.innerHTML = html;
+		var submit = qs('.cm-rp-submit', form);
+		var warned = !!(res.warnings && res.warnings.length && !(res.errors && res.errors.length));
+		form.elements.acceptwarnings.value = warned ? '1' : '0';
+		if (submit) {
+			submit.textContent = submit.getAttribute(warned ? 'data-label-anyway' : 'data-label');
+		}
+		box.scrollIntoView({ block: 'nearest' });
+	}
+
+	function submitRecordPanel(form) {
+		var view = form.closest('.cm-view');
+		var line = recordLine(form);
+		var submit = qs('.cm-rp-submit', form);
+		if (!submit || submit.disabled) {
+			return;
+		}
+		var fd = new FormData(form);
+		fd.append('token', line.getAttribute('data-token'));
+		submit.disabled = true;
+		form.classList.add('loading');
+		fetch(line.getAttribute('data-url'), { method: 'POST', body: fd, credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (res) {
+				form.classList.remove('loading');
+				if (res.ok && res.url) {
+					window.location.href = res.url;	// the new record's card, to finish it there
+					return;
+				}
+				submit.disabled = false;
+				if (!res.ok) {
+					recordMessages(form, res);
+					return;
+				}
+				notify(res.message + ((res.notes || []).length ? '<br>' + res.notes.join('<br>') : ''), true);
+				closeRecordPanel(view);
+				view.dispatchEvent(new CustomEvent('convomail:reload', { bubbles: true }));
+			})
+			.catch(function () {
+				form.classList.remove('loading');
+				submit.disabled = false;
+				notify('Error', false);
+			});
+	}
+
+	function pickerResults(picker) { return qs('.cm-picker-results', picker); }
+
+	function pickerSearch(input) {
+		var picker = input.closest('.cm-picker');
+		var line = recordLine(input);
+		var box = pickerResults(picker);
+		var q = input.value.trim();
+		if (q.length < 2) {
+			box.innerHTML = '';
+			return;
+		}
+		var url = line.getAttribute('data-search') + '?token=' + encodeURIComponent(line.getAttribute('data-token'))
+			+ '&q=' + encodeURIComponent(q) + '&types=' + encodeURIComponent(picker.getAttribute('data-types'))
+			+ '&role=' + encodeURIComponent(picker.getAttribute('data-role')) + '&write=' + picker.getAttribute('data-write');
+		fetch(url, { credentials: 'same-origin' })
+			.then(function (r) { return r.json(); })
+			.then(function (res) {
+				if (input.value.trim() !== q) {
+					return;	// typed on meanwhile
+				}
+				box.innerHTML = '';
+				(res.results || []).forEach(function (r, i) {
+					var item = document.createElement('button');
+					item.type = 'button';
+					item.className = 'cm-picker-item' + (i === 0 ? ' active' : '');
+					item.setAttribute('role', 'option');
+					item.setAttribute('data-id', r.id);
+					item.setAttribute('data-type', r.type);
+					item.setAttribute('data-name', r.name);
+					item.setAttribute('data-url', r.url || '');
+					item.setAttribute('data-html', r.html || '');	// Dolibarr's own link to it (core HTML)
+					item.textContent = r.label;
+					box.appendChild(item);
+				});
+				if (!box.children.length) {
+					var none = document.createElement('span');
+					none.className = 'cm-picker-none opacitymedium';
+					none.textContent = '…';
+					box.appendChild(none);
+				}
+			});
+	}
+
+	function pickerChoose(item) {
+		var picker = item.closest('.cm-picker');
+		qs('[data-cm-pick="id"]', picker).value = item.getAttribute('data-id');
+		var type = qs('[data-cm-pick="type"]', picker);
+		if (type) {
+			type.value = item.getAttribute('data-type');
+		}
+		qs('.cm-picker-input', picker).value = item.getAttribute('data-name');
+		var open = qs('.cm-picker-open', picker);
+		if (open) {
+			open.href = item.getAttribute('data-url');
+			open.hidden = !item.getAttribute('data-url');
+		}
+		pickerResults(picker).innerHTML = '';
+		showChosen(picker, item.getAttribute('data-html'));
+		checkTarget(picker);
+	}
+
+	/**
+	 * A picker with a record chosen shows Dolibarr's own link to it (as on a record's card) and a button to pick
+	 * another, instead of the search field; without a link (older answer) the field keeps the name
+	 */
+	function showChosen(picker, html) {
+		var chosen = qs('.cm-picker-chosen', picker);
+		if (!chosen || !html) {
+			return;
+		}
+		chosen.innerHTML = '';
+		var link = document.createElement('span');
+		link.className = 'cm-picker-link';
+		link.innerHTML = html;
+		chosen.appendChild(link);
+		var btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'cm-picker-change';
+		btn.setAttribute('data-cm-picker-change', '1');
+		btn.title = chosen.getAttribute('data-change') || '';
+		btn.innerHTML = '<span class="fas fa-pen"></span>';
+		chosen.appendChild(btn);
+		chosen.hidden = false;
+		qs('.cm-picker-input', picker).hidden = true;
+		var open = qs('.cm-picker-open', picker);
+		if (open) {
+			open.hidden = true;
+		}
+	}
+
+	// "Pick another": the search field again, empty and focused; nothing is chosen until a result is
+	function pickAnother(picker) {
+		var chosen = qs('.cm-picker-chosen', picker);
+		if (chosen) {
+			chosen.hidden = true;
+		}
+		qsa('[data-cm-pick]', picker).forEach(function (h) { h.value = ''; });
+		var input = qs('.cm-picker-input', picker);
+		input.hidden = false;
+		input.value = '';
+		input.focus();
+		var form = picker.closest('form.cm-rp');
+		if (form && form.elements.acceptwarnings) {
+			form.elements.acceptwarnings.value = '0';
+		}
+	}
+
+	// File panel: using a picker or the Documents folder choice selects its radio
+	function checkTarget(el) {
+		var label = el.previousElementSibling;
+		var radio = label && label.classList.contains('cm-rp-target') ? qs('input[type="radio"]', label) : null;
+		if (radio) {
+			radio.checked = true;
+		}
+	}
+
+	document.addEventListener('click', function (ev) {
+		var toggle = ev.target.closest('[data-cm-createmenu]');
+		var menu = toggle ? qs('.cm-menu', toggle.parentNode) : null;
+		closeCreateMenus(menu);
+		if (toggle) {
+			ev.preventDefault();
+			menu.hidden = !menu.hidden;
+			toggle.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+			if (!menu.hidden) {
+				qs('.cm-menu-item', menu).focus();
+			}
+			return;
+		}
+		var btn = ev.target.closest('[data-cm-record]');
+		if (btn) {
+			ev.preventDefault();
+			var view = btn.closest('.cm-view');
+			var slot = qs('.cm-recordpanel', view);
+			if (btn.classList.contains('cm-active') || slot.getAttribute('data-type') === btn.getAttribute('data-cm-record')) {
+				closeRecordPanel(view);	// the File button again, or the kind already open
+			} else {
+				openRecordPanel(view, btn.getAttribute('data-cm-record'));
+			}
+			return;
+		}
+		// Another kind of the same group: keep the third party and the customer's reference
+		var kind = ev.target.closest('[data-cm-kind]');
+		if (kind) {
+			ev.preventDefault();
+			var form = kind.closest('form.cm-rp');
+			if (kind.classList.contains('active')) {
+				return;
+			}
+			var carry = '&carry_socid=' + encodeURIComponent(form.elements.socid ? form.elements.socid.value : '')
+				+ '&carry_ref=' + encodeURIComponent(form.elements.ref_client ? form.elements.ref_client.value : '');
+			openRecordPanel(form.closest('.cm-view'), kind.getAttribute('data-cm-kind'), carry);
+			return;
+		}
+		// Fill from the invoice (1) or Read with AI (2): the same panel again, read on the server; keeps the supplier and number typed so far
+		var read = ev.target.closest('[data-cm-invoice-read]');
+		if (read) {
+			ev.preventDefault();
+			var rform = read.closest('form.cm-rp');
+			var rcarry = '&readinvoice=' + (read.getAttribute('data-cm-invoice-read') === '2' ? '2' : '1') + '&carry_socid=' + encodeURIComponent(rform.elements.socid ? rform.elements.socid.value : '')
+				+ '&carry_ref=' + encodeURIComponent(rform.elements.ref_supplier ? rform.elements.ref_supplier.value : '');
+			openRecordPanel(rform.closest('.cm-view'), rform.getAttribute('data-type'), rcarry, read);
+			return;
+		}
+		if (ev.target.closest('[data-cm-rp-close]')) {
+			ev.preventDefault();
+			closeRecordPanel(ev.target.closest('.cm-view'));
+			return;
+		}
+		var x = ev.target.closest('[data-cm-chip-remove]');
+		if (x) {
+			ev.preventDefault();
+			x.closest('.cm-rp-row').remove();	// the project: none (set on the card)
+			return;
+		}
+		var change = ev.target.closest('[data-cm-picker-change]');
+		if (change) {
+			ev.preventDefault();
+			pickAnother(change.closest('.cm-picker'));
+			return;
+		}
+		var item = ev.target.closest('.cm-picker-item');
+		if (item) {
+			ev.preventDefault();
+			pickerChoose(item);
+		}
+	});
+	document.addEventListener('submit', function (ev) {
+		if (ev.target.matches && ev.target.matches('form.cm-rp')) {
+			ev.preventDefault();
+			submitRecordPanel(ev.target);
+		}
+	});
+	document.addEventListener('input', function (ev) {
+		var form = ev.target.closest && ev.target.closest('form.cm-rp');
+		if (!form) {
+			return;
+		}
+		// Values changed after a warning: check them again before "anyway"
+		var submit = qs('.cm-rp-submit', form);
+		if (form.elements.acceptwarnings.value === '1' && submit) {
+			form.elements.acceptwarnings.value = '0';
+			submit.textContent = submit.getAttribute('data-label');
+		}
+		if (ev.target.classList.contains('cm-picker-input')) {
+			var picker = ev.target.closest('.cm-picker');
+			qsa('[data-cm-pick]', picker).forEach(function (h) { h.value = ''; });	// typed: nothing chosen yet
+			var open = qs('.cm-picker-open', picker);
+			if (open) {
+				open.hidden = true;
+			}
+			clearTimeout(ev.target.cmTimer);
+			ev.target.cmTimer = setTimeout(function () { pickerSearch(ev.target); }, 250);
+		}
+	});
+	document.addEventListener('focusin', function (ev) {
+		var t = ev.target;
+		if (t.closest && t.closest('.cm-rp-targets')) {
+			if (t.classList.contains('cm-picker-input')) {
+				checkTarget(t.closest('.cm-picker'));
+			} else if (t.tagName === 'SELECT') {
+				checkTarget(t);
+			}
+		}
+	});
+	document.addEventListener('focusout', function (ev) {
+		if (ev.target.classList && ev.target.classList.contains('cm-picker-input')) {
+			var box = pickerResults(ev.target.closest('.cm-picker'));
+			setTimeout(function () {
+				if (!box.contains(document.activeElement)) {
+					box.innerHTML = '';
+				}
+			}, 200);
+		}
+	});
+	document.addEventListener('keydown', function (ev) {
+		var menu = ev.target.closest && ev.target.closest('.cm-createmenu');
+		if (menu && !qs('.cm-menu', menu).hidden) {
+			var items = qsa('.cm-menu-item', menu);
+			var i = items.indexOf(document.activeElement);
+			if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+				ev.preventDefault();
+				items[(i + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+			} else if (ev.key === 'Escape') {
+				ev.preventDefault();
+				closeCreateMenus(null);
+				qs('[data-cm-createmenu]', menu).focus();
+			}
+			return;
+		}
+		var form = ev.target.closest && ev.target.closest('form.cm-rp');
+		if (!form) {
+			return;
+		}
+		var picker = ev.target.classList.contains('cm-picker-input') ? ev.target.closest('.cm-picker') : null;
+		var items = picker ? qsa('.cm-picker-item', picker) : [];
+		if (items.length && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+			ev.preventDefault();
+			var i = items.findIndex(function (it) { return it.classList.contains('active'); });
+			i = Math.max(0, Math.min(items.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)));
+			items.forEach(function (it, n) { it.classList.toggle('active', n === i); });
+		} else if (items.length && ev.key === 'Enter') {
+			ev.preventDefault();
+			pickerChoose(qs('.cm-picker-item.active', picker) || items[0]);
+		} else if (ev.key === 'Escape') {
+			ev.preventDefault();
+			if (items.length) {
+				pickerResults(picker).innerHTML = '';
+			} else {
+				closeRecordPanel(form.closest('.cm-view'));
+			}
+		}
+	});
+
+	document.addEventListener('DOMContentLoaded', function () {
+		bindFrames(document);
+		loadThread(document);
+
+		var switcher = qs('form.convomail-switcher select');
+		if (switcher) {
+			switcher.addEventListener('change', function () { switcher.form.submit(); });
+		}
+		// Searching can take a while on large folders: say so, and search again when the scope changes
+		var searchform = qs('form.cm-search');
+		if (searchform) {
+			searchform.addEventListener('submit', function () {
+				var rows = qs('.cm-rows');
+				var filtering = ['fsender', 'fsubject', 'fsince', 'funtil'].some(function (name) {
+					return searchform.elements[name] && searchform.elements[name].value.trim() !== '';
+				});
+				if (rows && (filtering || searchform.elements.search.value.trim() !== '')) {
+					rows.classList.add('cm-searching');
+					rows.setAttribute('data-searching', searchform.getAttribute('data-searching'));
+				}
+			});
+			var bodybox = searchform.querySelector('input[name=searchbody]');
+			if (bodybox) {
+				bodybox.addEventListener('change', function () {
+					if (searchform.elements.search.value.trim() !== '') {
+						searchform.requestSubmit ? searchform.requestSubmit() : searchform.submit();
+					}
+				});
+			}
+		}
+		var pagesize = qs('form.cm-pagesize select');
+		if (pagesize) {
+			pagesize.addEventListener('change', function () { pagesize.form.submit(); });
+		}
+		var conversation = qs('form.cm-conversation-switch input[type="checkbox"]');
+		if (conversation) {
+			conversation.addEventListener('change', function () { conversation.form.submit(); });
+		}
+
+		var app = qs('.cm-app');
+		if (!app) {
+			// Full-page message view: actions go back to the list when done
+			var view = qs('.cm-view[data-page="1"]');
+			if (view) {
+				bindPageView(view);
+			}
+			return;
+		}
+
+		var pane = qs('#cm-pane', app);
+		bindLayout(app);
+		var rowsBox = qs('.cm-rows', app);
+
+		// Rows are known by "mailbox:uid": the Combined Inbox (data-view="combined") lists several mailboxes, and
+		// each row, the open message and every action keep their own mailbox
+		var combined = app.getAttribute('data-view') === 'combined';
+		function keyOf(row) { return row.getAttribute('data-accountid') + ':' + row.getAttribute('data-uid'); }
+		function parseKey(key) {
+			var p = String(key).split(':');
+			return { acc: p[0], uid: parseInt(p[1], 10) };
+		}
+		function rows() { return qsa('.cm-row', rowsBox); }
+		function rowByKey(key) {
+			var k = parseKey(key);
+			return qs('.cm-row[data-accountid="' + CSS.escape(k.acc) + '"][data-uid="' + k.uid + '"]', rowsBox);
+		}
+		function currentKey() {
+			var v = qs('.cm-view', pane);
+			return v ? v.getAttribute('data-accountid') + ':' + v.getAttribute('data-uid') : '';
+		}
+		function selectedKeys() {
+			var list = qsa('.cm-check:checked', rowsBox).map(function (c) { return keyOf(c.closest('.cm-row')); });
+			if (!list.length && currentKey()) {
+				list = [currentKey()];
+			}
+			return list;
+		}
+		// The reading pane and the shortcuts: the open message, and the ticked rows with it
+		function openAndTicked() {
+			var list = qsa('.cm-check:checked', rowsBox).map(function (c) { return keyOf(c.closest('.cm-row')); });
+			var cur = currentKey();
+			if (cur && list.indexOf(cur) === -1) {
+				list.unshift(cur);
+			}
+			return list;
+		}
+		function folderOf(key) {
+			var row = rowByKey(key);
+			return (row && row.getAttribute('data-folder')) || app.getAttribute('data-folder');
+		}
+
+		// One request per mailbox. Answers {ok: one went through, done: keys changed, removed: keys gone, message}
+		function post(action, keys, extra) {
+			var groups = {};
+			keys.forEach(function (key) {
+				var k = parseKey(key);
+				(groups[k.acc] = groups[k.acc] || []).push(k.uid);
+			});
+			return Promise.all(Object.keys(groups).map(function (acc) {
+				var fd = new FormData();
+				fd.append('token', app.getAttribute('data-token'));
+				fd.append('accountid', acc);
+				fd.append('folder', folderOf(acc + ':' + groups[acc][0]));
+				fd.append('action', action);
+				groups[acc].forEach(function (u) { fd.append('uids[]', u); });
+				Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
+				return fetch(app.getAttribute('data-ajax-action'), { method: 'POST', body: fd, credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.catch(function () { return { ok: false, error: 'Error' }; })
+					.then(function (data) {
+						if (!data.ok) {
+							notify(data.error || 'Error', false);
+						}
+						data.acc = acc;
+						data.sent = groups[acc];
+						return data;
+					});
+			})).then(function (answers) {
+				var out = { ok: false, done: [], removed: [], message: '' };
+				answers.forEach(function (data) {
+					if (!data.ok) {
+						return;
+					}
+					out.ok = true;
+					data.sent.forEach(function (u) { out.done.push(data.acc + ':' + u); });
+					(data.removed || []).forEach(function (u) { out.removed.push(data.acc + ':' + u); });
+					out.message = data.message || out.message;
+				});
+				return out;
+			});
+		}
+
+		function decrementUnread(acc) {
+			window.dispatchEvent(new CustomEvent('convomail:unread-refresh'));	// the top-bar count
+			var badge = qs('.cm-count[data-accountid="' + CSS.escape(String(acc)) + '"][data-folder="' + CSS.escape(app.getAttribute('data-folder')) + '"]', app);
+			if (badge) {
+				var n = parseInt(badge.textContent, 10) - 1;
+				if (n > 0) {
+					badge.textContent = n;
+				} else {
+					badge.remove();
+				}
+			}
+		}
+
+		function setSelected(key) {
+			rows().forEach(function (r) { r.classList.toggle('selected', keyOf(r) === key); });
+			var row = rowByKey(key);
+			if (row) {
+				if (row.classList.contains('unread')) {
+					row.classList.remove('unread');
+					decrementUnread(parseKey(key).acc);
+				}
+				row.scrollIntoView({ block: 'nearest' });
+			}
+		}
+
+		function emptyPane() {
+			pane.innerHTML = '<div class="cm-empty cm-pane-empty"></div>';
+		}
+
+		function openMessage(key, showimages) {
+			var k = parseKey(key);
+			var params = '?accountid=' + encodeURIComponent(k.acc) + '&folder=' + encodeURIComponent(folderOf(key)) + '&uid=' + k.uid;
+			if (window.matchMedia('(max-width: 767px)').matches) {
+				window.location.href = app.getAttribute('data-page-message') + params;
+				return;
+			}
+			pane.classList.add('loading');
+			fetch(app.getAttribute('data-ajax-message') + params + (showimages ? '&showimages=1' : ''), { credentials: 'same-origin' })
+				.then(function (r) { return r.text(); })
+				.then(function (html) {
+					pane.innerHTML = html;
+					pane.classList.remove('loading');
+					pane.scrollTop = 0;
+					bindFrames(pane);
+					loadThread(pane);
+					setSelected(key);
+					history.replaceState(null, '', app.getAttribute('data-self') + (combined ? '&openaccount=' + encodeURIComponent(k.acc) : '') + '&uid=' + k.uid);
+				});
+		}
+
+		function removeRows(keys) {
+			var cur = currentKey();
+			var next = null;
+			// Skipped: rows going too, and the date headings between rows
+			var going = function (el) { return el && (!el.classList.contains('cm-row') || keys.indexOf(keyOf(el)) !== -1); };
+			keys.forEach(function (key) {
+				var row = rowByKey(key);
+				if (row) {
+					if (key === cur) {
+						// The next row that stays: its neighbours may be going too
+						var sib = row.nextElementSibling;
+						while (going(sib)) {
+							sib = sib.nextElementSibling;
+						}
+						if (!sib) {
+							sib = row.previousElementSibling;
+							while (going(sib)) {
+								sib = sib.previousElementSibling;
+							}
+						}
+						next = sib && sib.classList.contains('cm-row') ? keyOf(sib) : null;
+					}
+					row.remove();
+				}
+			});
+			if (keys.indexOf(cur) !== -1) {
+				if (next) {
+					openMessage(next);
+				} else {
+					emptyPane();
+				}
+			}
+		}
+
+		// Reload the rows of the current page (after filing: project chips, logged state, thread replies filed
+		// with it), keeping the open message selected, ticked rows and the scroll position. fresh: the Combined
+		// Inbox reads the mailboxes again instead of its one-minute cache (new mail)
+		function refreshRows(fresh) {
+			return fetch(app.getAttribute('data-self') + (fresh && combined ? '&refresh=1' : ''), { credentials: 'same-origin' })
+				.then(function (r) { return r.ok ? r.text() : ''; })
+				.then(function (html) {
+					var fresh = html ? new DOMParser().parseFromString(html, 'text/html').querySelector('.cm-rows') : null;
+					if (!fresh) {
+						return;
+					}
+					var cur = currentKey();
+					var ticked = qsa('.cm-check:checked', rowsBox).map(function (c) { return keyOf(c.closest('.cm-row')); });
+					var scroll = rowsBox.scrollTop;
+					rowsBox.innerHTML = fresh.innerHTML;
+					rows().forEach(function (r) {
+						r.classList.toggle('selected', keyOf(r) === cur);
+						var box = qs('.cm-check', r);
+						if (box && ticked.indexOf(keyOf(r)) !== -1) {
+							box.checked = true;
+						}
+					});
+					rowsBox.scrollTop = scroll;
+					// The "1–25 / 53" count and the page arrows (the page size form keeps its own element)
+					var paging = qs('.cm-paging', app);
+					var freshPaging = new DOMParser().parseFromString(html, 'text/html').querySelector('.cm-paging');
+					if (paging && freshPaging) {
+						Array.prototype.slice.call(paging.childNodes).forEach(function (n) {
+							if (n.nodeType === 3 || (n.matches && n.matches('a'))) {
+								paging.removeChild(n);
+							}
+						});
+						Array.prototype.slice.call(freshPaging.childNodes).forEach(function (n) {
+							if (n.nodeType === 3 || (n.matches && n.matches('a'))) {
+								paging.appendChild(document.importNode(n, true));
+							}
+						});
+					}
+					// The "25 messages" of the list head
+					var count = qs('.cm-list-count', app);
+					var freshCount = new DOMParser().parseFromString(html, 'text/html').querySelector('.cm-list-count');
+					if (count && freshCount) {
+						count.textContent = freshCount.textContent;
+					}
+				})
+				.catch(function () { /* the list stays as it was */ });
+		}
+
+		// "Mark all as read" in the top bar: show the rows read (and the folder counts) without a reload
+		window.addEventListener('convomail:unread-marked', function () {
+			if (!qs('.cm-check:checked', rowsBox)) {
+				refreshRows(true);
+			}
+		});
+
+		/*
+		 * New-mail checks (ajax/poll.php): every data-poll-interval seconds while the tab is visible. New mail
+		 * slides into the list when that disturbs nothing (first page, no search, nothing ticked or dragged);
+		 * otherwise the notice bar offers to show it. Two failed checks are retried quietly with a longer
+		 * wait; the third, or an error that won't fix itself, stops the checks and the bar offers Retry.
+		 */
+		(function () {
+			var interval = (parseInt(app.getAttribute('data-poll-interval'), 10) || 0) * 1000;
+			var url = app.getAttribute('data-poll-url');
+			var notice = qs('.cm-notice', app);
+			if (!interval || !url || !notice) {
+				return;
+			}
+			var texts = {};
+			try {
+				texts = JSON.parse(app.getAttribute('data-poll-texts') || '{}');
+			} catch (e) { /* the defaults below */ }
+			var t = function (key, arg) { return String(texts[key] || key).replace('%s', arg === undefined ? '' : arg); };
+			var folder = app.getAttribute('data-folder');
+			// Newest UID the page knows, per mailbox (-1: not known yet, a search page)
+			var since = {};
+			if (combined) {
+				try {
+					since = JSON.parse(app.getAttribute('data-maxuids') || '{}');
+				} catch (e) {
+					since = {};
+				}
+			} else {
+				since[app.getAttribute('data-accountid')] = parseInt(app.getAttribute('data-maxuid'), 10);
+			}
+			Object.keys(since).forEach(function (acc) {
+				since[acc] = parseInt(since[acc], 10);
+				if (isNaN(since[acc])) {
+					since[acc] = -1;
+				}
+			});
+			var uidvalidity = {};
+			var waiting = {};	// newest UIDs behind the notice bar
+			var failures = 0;
+			var timer = null;
+			var busy = false;
+			var stopped = false;
+			var lastCheck = Date.now();
+			var baseTitle = document.title;
+			var anyUnknown = function () { return Object.keys(since).some(function (acc) { return since[acc] < 0; }); };
+
+			function schedule(delay) {
+				clearTimeout(timer);
+				timer = null;
+				if (!stopped && !document.hidden) {
+					timer = setTimeout(check, delay);
+				}
+			}
+			function quiet() {
+				return app.getAttribute('data-page') === '0' && app.getAttribute('data-searching') === '0'
+					&& !qs('.cm-check:checked', rowsBox) && !app.classList.contains('cm-dragging') && !app.classList.contains('cm-dragging-folder');
+			}
+			// Text and buttons only (no HTML from the server): [{label, run}]
+			function showNotice(text, buttons, isError) {
+				notice.innerHTML = '';
+				notice.classList.toggle('cm-notice-error', !!isError);
+				var span = document.createElement('span');
+				span.className = 'cm-notice-text';
+				span.textContent = text;
+				notice.appendChild(span);
+				(buttons || []).forEach(function (b) {
+					var btn = document.createElement('button');
+					btn.type = 'button';
+					btn.className = 'cm-notice-btn';
+					btn.textContent = b.label;
+					btn.addEventListener('click', b.run);
+					notice.appendChild(btn);
+				});
+				var close = document.createElement('button');
+				close.type = 'button';
+				close.className = 'cm-notice-close';
+				close.title = t('dismiss');
+				close.textContent = '×';
+				close.addEventListener('click', hideNotice);
+				notice.appendChild(close);
+				notice.hidden = false;
+			}
+			function hideNotice() {
+				notice.hidden = true;
+				notice.innerHTML = '';
+			}
+			// Unread count of a folder link (of a mailbox, in the Combined Inbox)
+			function setCount(name, acc, n) {
+				var link = qs('.cm-folder[data-name="' + CSS.escape(name) + '"]' + (acc ? '[data-accountid="' + CSS.escape(String(acc)) + '"]' : ''), app);
+				if (!link) {
+					return;
+				}
+				var badge = qs('.cm-count', link);
+				if (n > 0 && !badge) {
+					badge = document.createElement('span');
+					badge.className = 'cm-count';
+					badge.setAttribute('data-folder', name);
+					badge.setAttribute('data-accountid', acc || app.getAttribute('data-accountid'));
+					link.appendChild(badge);
+				}
+				if (badge) {
+					if (n > 0) {
+						badge.textContent = n;
+					} else {
+						badge.remove();
+					}
+				}
+			}
+			function updateCounts(unseen) {
+				Object.keys(unseen || {}).forEach(function (name) {
+					var n = parseInt(unseen[name], 10) || 0;
+					setCount(name, null, n);
+					if (name === folder) {
+						document.title = (n > 0 ? '(' + n + ') ' : '') + baseTitle;
+					}
+				});
+			}
+			function copy(o) { return JSON.parse(JSON.stringify(o)); }
+			function advance(newest) {
+				Object.keys(newest).forEach(function (acc) { since[acc] = Math.max(since[acc], newest[acc]); });
+				if (combined) {
+					app.setAttribute('data-markuids', JSON.stringify(since));	// "Mark all as read" covers what is shown
+				}
+			}
+			function showNew() {
+				if (app.getAttribute('data-page') === '0' && app.getAttribute('data-searching') === '0') {
+					var before = copy(since);
+					advance(waiting);
+					hideNotice();
+					insertNew(before);
+				} else {
+					window.location.href = app.getAttribute('data-folder-url');
+				}
+			}
+			function insertNew(before) {
+				return refreshRows(true).then(function () {
+					rows().forEach(function (r) {
+						var acc = r.getAttribute('data-accountid');
+						if (before[acc] !== undefined && parseInt(r.getAttribute('data-uid'), 10) > before[acc]) {
+							r.classList.add('cm-row-new');
+						}
+					});
+				});
+			}
+			function retry() {
+				stopped = false;
+				failures = 0;
+				hideNotice();
+				check();
+			}
+			// retryin: seconds before asking again after a refusal that may pass (module re-enabled, permissions changed)
+			function fail(message, halt, session, retryin) {
+				failures++;
+				if (session) {
+					stopped = true;
+					showNotice(t('session'), [{ label: t('reload'), run: function () { window.location.reload(); } }], true);
+				} else if (halt || failures >= 3) {
+					stopped = true;
+					showNotice(t('stopped', message), [{ label: t('retry'), run: retry }], true);
+				} else if (retryin) {
+					schedule(retryin * 1000);
+				} else {
+					schedule(interval * Math.pow(2, failures));
+				}
+			}
+			function check() {
+				if (busy || stopped) {
+					return;
+				}
+				busy = true;
+				lastCheck = Date.now();
+				var q;
+				if (combined) {
+					q = url + '?view=combined' + Object.keys(since).map(function (acc) { return '&since[' + encodeURIComponent(acc) + ']=' + since[acc]; }).join('');
+				} else {
+					q = url + '?accountid=' + encodeURIComponent(app.getAttribute('data-accountid'))
+						+ '&folder=' + encodeURIComponent(folder) + '&since=' + since[app.getAttribute('data-accountid')];
+				}
+				fetch(q, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+					.then(function (r) {
+						var json = (r.headers.get('Content-Type') || '').indexOf('json') !== -1;
+						// Dolibarr answers its login page when the session has ended
+						return json ? r.json() : { ok: false, session: r.ok || r.status === 401 };
+					})
+					.then(function (data) {
+						busy = false;
+						if (!data.ok) {
+							fail(data.error || 'Error', !!data.halt, !!data.session, parseInt(data.retryin, 10) || 0);
+							return;
+						}
+						failures = 0;
+						if (notice.classList.contains('cm-notice-error')) {
+							hideNotice();
+						}
+						// Per mailbox: {ok, new, newest, uidvalidity} (one mailbox outside the Combined Inbox)
+						var answers = {};
+						if (combined) {
+							answers = data.accounts || {};
+						} else {
+							answers[app.getAttribute('data-accountid')] = data;
+							updateCounts(data.unseen);
+						}
+						var total = 0;
+						var unseen = 0;
+						var newest = {};
+						var errors = [];
+						var changed = false;
+						Object.keys(answers).forEach(function (acc) {
+							var a = answers[acc];
+							if (!a.ok) {
+								errors.push(a.error || 'Error');
+								return;
+							}
+							if (combined) {
+								unseen += parseInt(a.unseen, 10) || 0;
+								setCount(folder, acc, parseInt(a.unseen, 10) || 0);
+							}
+							// A new UIDVALIDITY, or UIDs going down (only possible then): the folder was recreated on the server
+							if ((uidvalidity[acc] && a.uidvalidity !== uidvalidity[acc]) || (since[acc] >= 0 && a.newest < since[acc])) {
+								changed = true;
+							}
+							uidvalidity[acc] = a.uidvalidity;
+							if (since[acc] < 0) {
+								since[acc] = a.newest;	// first check of a search page: the baseline
+							} else if (a.new > 0) {
+								total += a.new;
+								newest[acc] = a.newest;
+							}
+						});
+						if (combined) {
+							document.title = (unseen > 0 ? '(' + unseen + ') ' : '') + baseTitle;
+						}
+						if (changed) {
+							stopped = true;
+							showNotice(t('changed'), [{ label: t('reload'), run: function () { window.location.reload(); } }]);
+							return;
+						}
+						if (total > 0) {
+							window.dispatchEvent(new CustomEvent('convomail:unread-refresh'));	// the top-bar count
+							if (quiet()) {
+								var before = copy(since);
+								advance(newest);
+								hideNotice();
+								insertNew(before);
+							} else {
+								Object.keys(newest).forEach(function (acc) { waiting[acc] = Math.max(waiting[acc] || 0, newest[acc]); });
+								showNotice(total === 1 ? t('one') : t('many', total), [{ label: t('show'), run: showNew }]);
+							}
+						} else if (errors.length) {
+							// Some mailboxes of the Combined Inbox did not answer: say which, keep checking the others
+							showNotice(t('error', errors.join(' · ')), [], true);
+						}
+						schedule(interval);
+					})
+					.catch(function () {
+						busy = false;
+						fail(t('error', ''), false, false);
+					});
+			}
+
+			document.addEventListener('visibilitychange', function () {
+				if (document.hidden) {
+					clearTimeout(timer);
+					timer = null;
+				} else if (!stopped) {
+					// Back on the tab: check now if the last check is old, else when it is due
+					schedule(Math.max(0, interval - (Date.now() - lastCheck)));
+				}
+			});
+			// A search page has no baseline yet: take it soon
+			schedule(anyUnknown() ? 2000 : interval);
+		})();
+
+		function run(action, keys, extra) {
+			if (!keys.length) {
+				return Promise.resolve(null);
+			}
+			if (action === 'delete' && keys.length > 1 && !window.confirm(app.getAttribute('data-confirm-delete'))) {
+				return Promise.resolve(null);
+			}
+			return post(action, keys, extra).then(function (data) {
+				if (!data.ok) {
+					return;
+				}
+				if (data.removed.length) {
+					removeRows(data.removed);
+				}
+				data.done.forEach(function (key) {
+					var row = rowByKey(key);
+					if (!row) {
+						return;
+					}
+					if (action === 'read') { row.classList.remove('unread'); }
+					if (action === 'unread') { row.classList.add('unread'); }
+					if (action === 'flag') { row.classList.add('flagged'); }
+					if (action === 'unflag') { row.classList.remove('flagged'); }
+				});
+				if (action === 'unread' && data.done.indexOf(currentKey()) !== -1) {
+					emptyPane();
+				}
+				if ((action === 'flag' || action === 'unflag' || action === 'log') && data.done.indexOf(currentKey()) !== -1) {
+					openMessage(currentKey());
+				}
+				if (action === 'log') {
+					refreshRows();
+				}
+				qsa('.cm-check:checked', rowsBox).forEach(function (c) { c.checked = false; });
+				notify(data.message, true);
+				return data;
+			});
+		}
+
+		/*
+		 * Folders (ajax/folder.php): New folder, rename and delete an empty folder, "New folder..." in the Move
+		 * menus, and dragging messages from the list onto a folder
+		 */
+		function folderCall(action, fields, acc) {
+			var fd = new FormData();
+			fd.append('token', app.getAttribute('data-token'));
+			fd.append('accountid', acc || app.getAttribute('data-accountid'));
+			fd.append('action', action);
+			Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+			return fetch(app.getAttribute('data-ajax-folder'), { method: 'POST', body: fd, credentials: 'same-origin' })
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) {
+						throw new Error(res.error || 'Error');
+					}
+					return res;
+				});
+		}
+		function folderPage(name) {
+			return window.location.pathname + '?accountid=' + encodeURIComponent(app.getAttribute('data-accountid')) + '&folder=' + encodeURIComponent(name);
+		}
+		// A text field in place of an element (or under it, keep = true): Enter saves, Escape or leaving it cancels
+		function askName(el, value, save, keep) {
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.className = 'cm-folder-input';
+			input.maxLength = 100;
+			input.value = value;
+			input.placeholder = app.getAttribute('data-new-folder-prompt');
+			if (keep) {
+				input.style.marginLeft = 'calc(' + ((parseInt(el.getAttribute('data-depth') || '0', 10) + 1) * 14) + 'px)';
+			}
+			el.style.display = keep ? '' : 'none';
+			el.parentNode.insertBefore(input, el.nextSibling);
+			input.focus();
+			input.select();
+			var done = false;
+			var close = function () {
+				if (!done) {
+					done = true;
+					input.remove();
+					el.style.display = '';
+				}
+			};
+			input.addEventListener('keydown', function (ev) {
+				if (ev.key === 'Escape') {
+					close();
+				} else if (ev.key === 'Enter') {
+					ev.preventDefault();
+					var v = input.value.trim();
+					if (!v || v === value) {
+						close();
+						return;
+					}
+					input.disabled = true;
+					save(v).catch(function (e) {
+						notify(e.message, false);
+						input.disabled = false;
+						input.focus();
+					});
+				}
+			});
+			input.addEventListener('blur', function () { setTimeout(function () { if (!input.disabled) { close(); } }, 150); });
+		}
+		// Destination of a Move menu: the chosen folder, or a new one ("New folder..."); null when cancelled.
+		// acc: the mailbox of the menu (the open message's, for the reading pane's)
+		function pickFolder(sel, acc) {
+			if (sel.value !== '__new__') {
+				return Promise.resolve(sel.value);
+			}
+			var name = window.prompt(app.getAttribute('data-new-folder-prompt'));
+			sel.value = '';
+			if (!name || !name.trim()) {
+				return Promise.resolve(null);
+			}
+			return folderCall('create', { name: name.trim() }, acc).then(function (res) {
+				app.setAttribute('data-folders-changed', '1');
+				return res.name;
+			}, function (e) {
+				notify(e.message, false);
+				return null;
+			});
+		}
+		// The Combined Inbox's Move menu says the mailbox ("3|Projects"); an email moves only within its own mailbox,
+		// so the emails of the other mailboxes stay where they are, and the user is told
+		function onlyMailbox(keys, acc) {
+			if (!acc) {
+				return keys;
+			}
+			var mine = keys.filter(function (key) { return parseKey(key).acc === String(acc); });
+			if (mine.length < keys.length) {
+				notify(app.getAttribute('data-other-mailbox').replace('%s', keys.length - mine.length), false);
+			}
+			return mine;
+		}
+		function moveTo(sel, keys, acc) {
+			var value = sel.value;
+			if (combined && !acc) {
+				var bar = value.indexOf('|');
+				acc = value.slice(0, bar);
+				value = value.slice(bar + 1);
+				sel.value = '';
+			}
+			var dest = value === '__new__' ? pickFolder(sel, acc) : Promise.resolve(value);
+			dest.then(function (dest) {
+				sel.value = '';
+				keys = onlyMailbox(keys, acc);
+				if (!dest || !keys.length) {
+					return;
+				}
+				run('move', keys, { dest: dest }).then(function () {
+					if (app.getAttribute('data-folders-changed')) {
+						window.location.reload();	// show the new folder in the list
+					}
+				});
+			});
+		}
+
+		var folderBox = qs('.cm-folders', app);
+		if (app.getAttribute('data-ajax-folder')) {
+			folderBox.addEventListener('click', function (ev) {
+				var tool = ev.target.closest('[data-cm-folder]');
+				if (!tool) {
 					return;
 				}
 				ev.preventDefault();
-				if (window.CKEDITOR && CKEDITOR.instances.message) {
-					CKEDITOR.instances.message.updateElement();
-				}
-				var data = new FormData(form);
-				data.set('cmsave', btn.value);
-				data.set('cmajax', '1');
-				var buttons = box.querySelectorAll('button[name="cmsave"]');
-				buttons.forEach(function (b) { b.disabled = true; });
-				// Dolibarr's input feedback classes (theme input-feedback.css; nothing on older themes)
-				var feedback = function (state) {
-					btn.classList.remove('processing-feedback', 'success-feedback', 'fail-feedback');
-					if (state) {
-						btn.classList.add(state + '-feedback');
-						if (state !== 'processing') {
-							setTimeout(function () { btn.classList.remove(state + '-feedback'); }, 1500);
-						}
+				ev.stopPropagation();
+				var what = tool.getAttribute('data-cm-folder');
+				var link = tool.closest('.cm-folder');
+				if (what === 'create') {
+					askName(tool, '', function (name) {
+						return folderCall('create', { name: name }).then(function () { window.location.reload(); });
+					});
+				} else if (what === 'subfolder') {
+					askName(link, '', function (name) {
+						return folderCall('create', { name: name, parent: link.getAttribute('data-name') }).then(function () {
+							setCollapsed(link.getAttribute('data-name'), false);	// show the new subfolder
+							window.location.reload();
+						});
+					}, true);
+				} else if (what === 'rename') {
+					askName(link, link.getAttribute('data-label'), function (name) {
+						return folderCall('rename', { name: link.getAttribute('data-name'), newname: name }).then(function (res) {
+							if (link.classList.contains('active')) {
+								window.location.href = folderPage(res.name);	// the open folder has a new name
+							} else {
+								window.location.reload();
+							}
+						});
+					});
+				} else if (what === 'delete') {
+					if (!window.confirm(app.getAttribute('data-confirm-delete-folder').replace('%s', link.getAttribute('data-label')))) {
+						return;
 					}
-				};
-				feedback('processing');
-				show([box.getAttribute('data-saving')], false);
-				fetch(form.getAttribute('action'), { method: 'POST', body: data, credentials: 'same-origin' })
-					.then(function (r) { return r.json(); })
-					.then(function (res) {
-						if (res && res.ok && res.draft && btn.value === 'draft') {
-							form.querySelector('[name="draftaccountid"]').value = res.draft.accountid;
-							form.querySelector('[name="draftfolder"]').value = res.draft.folder;
-							form.querySelector('[name="draftuid"]').value = res.draft.uid;
+					folderCall('delete', { name: link.getAttribute('data-name') }).then(function () {
+						if (link.classList.contains('active')) {
+							window.location.href = folderPage('INBOX');
+						} else {
+							window.location.reload();
 						}
-						if (res && res.ok && res.template && btn.value === 'template') {
-							addSavedTemplate(res.template);
-						}
-						show(res && res.ok ? res.messages : (res && res.errors && res.errors.length ? res.errors : ['?']), !(res && res.ok));
-						feedback(res && res.ok ? 'success' : 'fail');
-					})
-					.catch(function (e) { show([String(e)], true); feedback('fail'); })
-					.then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+					}, function (e) { notify(e.message, false); });
+				}
+			});
+			folderBox.addEventListener('keydown', function (ev) {
+				var tool = ev.target.closest('[data-cm-folder]');
+				if (tool && (ev.key === 'Enter' || ev.key === ' ')) {
+					ev.preventDefault();
+					tool.click();
+				}
+			});
+		}
+
+		// Folder tree: collapse a folder's subfolders (kept per account in this browser). The open folder's
+		// branch is always shown; a collapsed folder opens while messages are dragged over it.
+		var collapseKey = 'convomail.collapsed.' + app.getAttribute('data-accountid');
+		var collapsed = {};
+		try {
+			(JSON.parse(window.localStorage.getItem(collapseKey)) || []).forEach(function (n) { collapsed[n] = true; });
+		} catch (e) {
+			collapsed = {};
+		}
+		var folderLinks = qsa('.cm-folder', folderBox);
+		var parentOf = {};
+		folderLinks.forEach(function (a) { parentOf[a.getAttribute('data-name')] = a.getAttribute('data-parent') || ''; });
+		function setCollapsed(name, on) {
+			if (on) {
+				collapsed[name] = true;
+			} else {
+				delete collapsed[name];
+			}
+			try {
+				window.localStorage.setItem(collapseKey, JSON.stringify(Object.keys(collapsed)));
+			} catch (e) { /* sizes last for this page only */ }
+		}
+		function applyTree() {
+			folderLinks.forEach(function (a) {
+				var hidden = false;
+				for (var p = parentOf[a.getAttribute('data-name')]; p; p = parentOf[p]) {
+					if (collapsed[p]) {
+						hidden = true;
+						break;
+					}
+				}
+				a.classList.toggle('cm-folder-hidden', hidden);
+				var toggle = qs('[data-cm-toggle]', a);
+				if (toggle) {
+					var closed = !!collapsed[a.getAttribute('data-name')];
+					a.classList.toggle('cm-folder-collapsed', closed);
+					toggle.setAttribute('aria-expanded', closed ? 'false' : 'true');
+				}
+			});
+		}
+		for (var open = parentOf[app.getAttribute('data-folder')]; open; open = parentOf[open]) {
+			if (collapsed[open]) {
+				setCollapsed(open, false);
+			}
+		}
+		applyTree();
+		folderBox.addEventListener('click', function (ev) {
+			var toggle = ev.target.closest('[data-cm-toggle]');
+			if (toggle) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				var name = toggle.closest('.cm-folder').getAttribute('data-name');
+				setCollapsed(name, !collapsed[name]);
+				applyTree();
+			}
+		}, true);
+		folderBox.addEventListener('keydown', function (ev) {
+			var toggle = ev.target.closest('[data-cm-toggle]');
+			if (toggle && (ev.key === 'Enter' || ev.key === ' ')) {
+				ev.preventDefault();
+				toggle.click();
+			}
+		});
+		var openTimer = null;
+
+		// Moving a folder: drag one of the user's folders (data-movable) onto another folder, or onto the
+		// top-level zone above the list; ajax/folder.php action=move renames it, subfolders included
+		var movingFolder = null;
+		var rootZone = qs('[data-cm-root]', folderBox);
+		function within(name, ancestor) {	// name is ancestor or one of its subfolders
+			for (var n = name; n; n = parentOf[n]) {
+				if (n === ancestor) {
+					return true;
+				}
+			}
+			return false;
+		}
+		function folderTarget(ev) {	// where a dragged folder may go: a folder name, '' (top level) or null
+			if (!movingFolder) {
+				return null;
+			}
+			if (rootZone && ev.target.closest('[data-cm-root]')) {
+				return parentOf[movingFolder] ? '' : null;
+			}
+			var f = ev.target.closest('.cm-folder');
+			if (!f) {
+				return null;
+			}
+			var name = f.getAttribute('data-name');
+			return (within(name, movingFolder) || parentOf[movingFolder] === name) ? null : name;
+		}
+		folderBox.addEventListener('dragstart', function (ev) {
+			var f = ev.target.closest ? ev.target.closest('.cm-folder[data-movable]') : null;
+			if (!f) {
+				return;
+			}
+			movingFolder = f.getAttribute('data-name');
+			ev.dataTransfer.effectAllowed = 'move';
+			ev.dataTransfer.setData('text/plain', f.getAttribute('data-label'));
+			// After the drag has started: Chrome cancels a drag when the page changes during dragstart
+			setTimeout(function () {
+				if (movingFolder) {
+					app.classList.add('cm-dragging-folder');
+					f.classList.add('cm-dragged');
+				}
+			}, 0);
+		});
+		folderBox.addEventListener('dragend', function () {
+			movingFolder = null;
+			app.classList.remove('cm-dragging-folder');
+			qsa('.cm-dragged, .cm-drop', folderBox).forEach(function (el) { el.classList.remove('cm-dragged', 'cm-drop'); });
+		});
+		folderBox.addEventListener('dragover', function (ev) {
+			var dest = folderTarget(ev);
+			if (dest === null) {
+				return;
+			}
+			ev.preventDefault();
+			ev.dataTransfer.dropEffect = 'move';
+			var el = dest === '' ? rootZone : ev.target.closest('.cm-folder');
+			qsa('.cm-drop', folderBox).forEach(function (o) { if (o !== el) { o.classList.remove('cm-drop'); } });
+			if (dest !== '' && !el.classList.contains('cm-drop') && el.classList.contains('cm-folder-collapsed')) {
+				clearTimeout(openTimer);
+				openTimer = setTimeout(function () {
+					if (el.classList.contains('cm-drop')) {
+						setCollapsed(dest, false);
+						applyTree();
+					}
+				}, 700);
+			}
+			el.classList.add('cm-drop');
+		});
+		folderBox.addEventListener('drop', function (ev) {
+			var dest = folderTarget(ev);
+			if (dest === null) {
+				return;
+			}
+			ev.preventDefault();
+			var name = movingFolder;
+			var active = app.getAttribute('data-folder');
+			folderCall('move', { name: name, parent: dest }).then(function (res) {
+				if (dest) {
+					setCollapsed(dest, false);	// show where it went
+				}
+				if (within(active, name)) {
+					window.location.href = folderPage(res.name + active.slice(name.length));	// the open folder moved too
+				} else {
+					window.location.reload();
+				}
+			}, function (e) { notify(e.message, false); });
+		});
+
+		// Drag messages onto a folder: the ticked ones if the dragged row is ticked, else that row
+		var dragging = null;
+		function endDrag() {
+			dragging = null;
+			app.classList.remove('cm-dragging');
+			qsa('.cm-dragged', rowsBox).forEach(function (r) { r.classList.remove('cm-dragged'); });
+			qsa('.cm-drop', folderBox).forEach(function (f) { f.classList.remove('cm-drop'); });
+		}
+		rowsBox.addEventListener('dragstart', function (ev) {
+			var row = ev.target.closest ? ev.target.closest('.cm-row') : null;
+			if (!row) {
+				return;
+			}
+			var check = qs('.cm-check', row);
+			dragging = (check && check.checked) ? selectedKeys() : [keyOf(row)];
+			ev.dataTransfer.effectAllowed = 'move';
+			ev.dataTransfer.setData('text/plain', dragging.length + ' message' + (dragging.length > 1 ? 's' : ''));
+			app.classList.add('cm-dragging');
+			dragging.forEach(function (key) {
+				var r = rowByKey(key);
+				if (r) {
+					r.classList.add('cm-dragged');
+				}
 			});
 		});
+		rowsBox.addEventListener('dragend', endDrag);
+		// A folder messages may be dropped on: not the one listed; in the Combined Inbox, a folder of a mailbox
+		function dropFolder(ev) {
+			var f = ev.target.closest('.cm-folder[data-name]');
+			if (!dragging || !f || f.getAttribute('data-name') === app.getAttribute('data-folder') || (combined && !f.getAttribute('data-accountid'))) {
+				return null;
+			}
+			// Not a target when none of the dragged emails is in that folder's mailbox
+			if (combined && !dragging.some(function (key) { return parseKey(key).acc === f.getAttribute('data-accountid'); })) {
+				return null;
+			}
+			return f;
+		}
+		folderBox.addEventListener('dragover', function (ev) {
+			var f = dropFolder(ev);
+			if (!f) {
+				return;
+			}
+			ev.preventDefault();
+			ev.dataTransfer.dropEffect = 'move';
+			qsa('.cm-drop', folderBox).forEach(function (o) { if (o !== f) { o.classList.remove('cm-drop'); } });
+			if (!f.classList.contains('cm-drop') && f.classList.contains('cm-folder-collapsed')) {
+				clearTimeout(openTimer);
+				openTimer = setTimeout(function () {
+					if (f.classList.contains('cm-drop')) {
+						setCollapsed(f.getAttribute('data-name'), false);
+						applyTree();
+					}
+				}, 700);
+			}
+			f.classList.add('cm-drop');
+		});
+		folderBox.addEventListener('dragleave', function (ev) {
+			var f = ev.target.closest('.cm-folder');
+			if (f && !f.contains(ev.relatedTarget)) {
+				f.classList.remove('cm-drop');
+			}
+		});
+		folderBox.addEventListener('drop', function (ev) {
+			var f = dropFolder(ev);
+			if (!f) {
+				return;
+			}
+			ev.preventDefault();
+			var keys = onlyMailbox(dragging, f.getAttribute('data-accountid'));
+			endDrag();
+			if (keys.length) {
+				run('move', keys, { dest: f.getAttribute('data-name') });
+			}
+		});
+
+		// Rows: open, star, select
+		rowsBox.addEventListener('click', function (ev) {
+			var row = ev.target.closest('.cm-row');
+			if (!row) {
+				return;
+			}
+			var key = keyOf(row);
+			var rowAction = ev.target.closest('[data-cm-row-action]');
+			if (rowAction) {
+				// Buttons of the row under the mouse: they act on that row only
+				ev.preventDefault();
+				var act = rowAction.getAttribute('data-cm-row-action');
+				if (act === 'toggleread') {
+					act = row.classList.contains('unread') ? 'read' : 'unread';
+				}
+				run(act, [key]);
+				return;
+			}
+			if (ev.target.closest('.cm-star')) {
+				ev.preventDefault();
+				run(row.classList.contains('flagged') ? 'unflag' : 'flag', [key]);
+				return;
+			}
+			if (ev.target.closest('.cm-check') || ev.target.closest('.cm-row-tags a')) {
+				return;
+			}
+			if (ev.metaKey || ev.ctrlKey || ev.shiftKey) {
+				return;	// let the browser open the link in a new tab
+			}
+			ev.preventDefault();
+			openMessage(key);
+		});
+
+		var checkall = qs('.cm-checkall', app);
+		if (checkall) {
+			checkall.addEventListener('change', function () {
+				qsa('.cm-check', rowsBox).forEach(function (c) { c.checked = checkall.checked; });
+			});
+		}
+
+		// List toolbar
+		qsa('[data-cm-bulk]', app).forEach(function (el) {
+			var action = el.getAttribute('data-cm-bulk');
+			if (el.tagName === 'SELECT') {
+				el.addEventListener('change', function () {
+					if (el.value) {
+						moveTo(el, selectedKeys(), null);
+					}
+				});
+			} else {
+				el.addEventListener('click', function () { run(action, selectedKeys()); });
+			}
+		});
+		// Combined Inbox: every unread email of its Inboxes up to the newest shown, then the list again
+		var markall = qs('[data-cm-markall]', app);
+		if (markall) {
+			markall.addEventListener('click', function () {
+				if (!window.confirm(app.getAttribute('data-markall-confirm'))) {
+					return;
+				}
+				var uids = {};
+				try {
+					uids = JSON.parse(app.getAttribute('data-markuids') || '{}');
+				} catch (e) {
+					uids = {};
+				}
+				var fd = new FormData();
+				fd.append('token', app.getAttribute('data-token'));
+				fd.append('action', 'markread');
+				Object.keys(uids).forEach(function (acc) {
+					if (uids[acc] > 0) {
+						fd.append('maxuid[' + acc + ']', uids[acc]);
+					}
+				});
+				markall.disabled = true;
+				fetch(app.getAttribute('data-ajax-combined'), { method: 'POST', body: fd, credentials: 'same-origin' })
+					.then(function (r) { return r.json(); })
+					.then(function (res) {
+						(res.errors || []).forEach(function (e) { notify(e, false); });
+						window.dispatchEvent(new CustomEvent('convomail:unread-refresh'));
+						window.location.href = app.getAttribute('data-folder-url') + '&refresh=1';	// rows and counts as they are now
+					})
+					.catch(function () { markall.disabled = false; });
+			});
+		}
+
+		// Reading pane toolbar (delegated: the pane is replaced on each open)
+		pane.addEventListener('click', function (ev) {
+			var btn = ev.target.closest('[data-cm-action]');
+			if (btn && btn.tagName !== 'SELECT') {
+				ev.preventDefault();
+				var action = btn.getAttribute('data-cm-action');
+				var extra = {};
+				if (action === 'log') {
+					extra = { projectid: btn.getAttribute('data-projectid'), socid: btn.getAttribute('data-socid'), contactids: btn.getAttribute('data-contactids') || '' };
+				}
+				run(action, action === 'log' ? [currentKey()] : openAndTicked(), extra);
+				return;
+			}
+			if (ev.target.closest('[data-cm-showimages]')) {
+				ev.preventDefault();
+				openMessage(currentKey(), true);
+			}
+		});
+		// Attachments filed from the "From this email" panel: show the message again (its log state may have changed)
+		pane.addEventListener('convomail:reload', function () { openMessage(currentKey()); });
+		pane.addEventListener('change', function (ev) {
+			var sel = ev.target.closest('select[data-cm-action="move"]');
+			if (sel && sel.value) {
+				moveTo(sel, openAndTicked(), parseKey(currentKey()).acc);
+			}
+		});
+
+		// Keyboard shortcuts
+		document.addEventListener('keydown', function (ev) {
+			var t = ev.target;
+			// Not .cm-check: focus stays on a row's checkbox after ticking it
+			if ((t && t.closest && t.closest('input:not(.cm-check), textarea, select, [contenteditable], .cm-resize, .cm-rp, .cm-createmenu')) || ev.metaKey || ev.ctrlKey || ev.altKey) {
+				return;
+			}
+			var list = rows();
+			var cur = currentKey();
+			var targets = openAndTicked();
+			var idx = list.findIndex(function (r) { return keyOf(r) === cur; });
+			var key = ev.key;
+			var press = function (selector) {
+				var el = qs(selector, pane);
+				if (el) {
+					ev.preventDefault();
+					el.click();
+				}
+			};
+			if (key === 'ArrowDown' || key === 'j') {
+				var n = list[Math.min(list.length - 1, idx + 1)];
+				if (n) { ev.preventDefault(); openMessage(keyOf(n)); }
+			} else if (key === 'ArrowUp' || key === 'k') {
+				var p = list[Math.max(0, idx - 1)];
+				if (p) { ev.preventDefault(); openMessage(keyOf(p)); }
+			} else if (key === 'n') {
+				// Next unread row below the open one, from the top when there is none below
+				var unread = list.filter(function (r, i) { return i > idx && r.classList.contains('unread'); })[0]
+					|| list.filter(function (r) { return r.classList.contains('unread') && keyOf(r) !== cur; })[0];
+				if (unread) {
+					ev.preventDefault();
+					openMessage(keyOf(unread));
+				}
+			} else if (key === 'Enter' && idx === -1 && list.length) {
+				ev.preventDefault();
+				openMessage(keyOf(list[0]));
+			} else if (key === 'r') {
+				press('[data-cm-key="r"]');
+			} else if (key === 'a') {
+				press('[data-cm-key="a"]');
+			} else if (key === 'f') {
+				press('[data-cm-key="f"]');
+			} else if (key === '!') {
+				press('[data-cm-key="!"]');	// Spam, or Not spam in the Junk folder
+			} else if ((key === '#' || key === 'Delete') && targets.length) {
+				ev.preventDefault();
+				run('delete', targets);
+			} else if (key === 'e' && targets.length) {
+				ev.preventDefault();
+				run('archive', targets);
+			} else if (key === 's' && targets.length) {
+				ev.preventDefault();
+				var row = rowByKey(targets[0]);
+				run(row && row.classList.contains('flagged') ? 'unflag' : 'flag', targets);
+			} else if (key === 'u' && targets.length) {
+				ev.preventDefault();
+				run('unread', targets);
+			}
+		});
+
+		// Display menu of the list head: a choice (order, list or table, density) is saved at once (the page comes back with it)
+		qsa('form.cm-display input[name="density"], form.cm-display input[name="listview"], form.cm-display select[name="sortby"]', app).forEach(function (field) {
+			field.addEventListener('change', function () {
+				field.form.submit();
+			});
+		});
+		var displayMenu = qs('details.cm-display-menu', app);
+		if (displayMenu) {
+			document.addEventListener('click', function (ev) {
+				if (displayMenu.open && !displayMenu.contains(ev.target)) {
+					displayMenu.open = false;
+				}
+			});
+		}
+		// A picture that cannot be loaded (no right to see it, file gone) leaves the initials under it
+		app.addEventListener('error', function (ev) {
+			if (ev.target && ev.target.classList && ev.target.classList.contains('cm-avatar-img')) {
+				ev.target.remove();
+			}
+		}, true);
+
+		var selected = qs('.cm-row.selected', rowsBox);
+		if (selected) {
+			selected.scrollIntoView({ block: 'nearest' });
+		}
+		// Phones: the folders are one row that scrolls sideways; show the open one
+		var activeFolder = qs('.cm-folderlist a.cm-folder.active', app);
+		if (activeFolder && activeFolder.parentNode.scrollWidth > activeFolder.parentNode.clientWidth) {
+			activeFolder.parentNode.scrollLeft = activeFolder.offsetLeft - activeFolder.parentNode.offsetLeft - 16;
+		}
+	});
+
+	/**
+	 * Resizable mailbox: the folder and list columns (handles between the columns) and the height of the
+	 * conversation under the open message (handle above it). Sizes are kept in this browser (localStorage).
+	 */
+	function bindLayout(app) {
+		var KEY = 'convomail.layout';
+		var layout = {};
+		try {
+			layout = JSON.parse(window.localStorage.getItem(KEY)) || {};
+		} catch (e) {
+			layout = {};
+		}
+		function save() {
+			try {
+				window.localStorage.setItem(KEY, JSON.stringify(layout));
+			} catch (e) { /* private window: sizes last for this page only */ }
+		}
+		function apply() {
+			[['col1', '--cm-col1', 'px'], ['col2', '--cm-col2', 'px'], ['conv', '--cm-conv-h', '%'], ['listh', '--cm-listh', 'px']].forEach(function (v) {
+				if (layout[v[0]]) {
+					app.style.setProperty(v[1], (v[2] === '%' ? layout[v[0]] * 100 : layout[v[0]]) + v[2]);
+				} else {
+					app.style.removeProperty(v[1]);
+				}
+			});
+		}
+		function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+		// Current size of what a handle controls, and how to set it
+		function target(handle) {
+			if (handle.classList.contains('cm-resize-row')) {
+				var view = handle.parentNode;
+				var slot = handle.nextElementSibling;
+				return {
+					kind: 'row',
+					size: slot ? slot.getBoundingClientRect().height : 0,
+					set: function (h) {
+						var total = view.clientHeight;
+						if (total > 0) {
+							layout.conv = clamp(h, 60, Math.max(60, total - 120)) / total;
+						}
+					},
+					reset: function () { delete layout.conv; },
+					sign: -1	// dragging up makes the conversation taller
+				};
+			}
+			var col = handle.getAttribute('data-col');
+			if (col === '2' && app.classList.contains('cm-view-table')) {
+				// Table view: the handle lies between the list and the reading pane under it
+				var list = qs('.cm-list', app);
+				return {
+					kind: 'row',
+					size: list.getBoundingClientRect().height,
+					set: function (h) {
+						layout.listh = Math.round(clamp(h, 120, Math.max(120, app.clientHeight - 160)));
+					},
+					reset: function () { delete layout.listh; },
+					sign: 1,
+					keys: { ArrowDown: 1, ArrowUp: -1 }
+				};
+			}
+			var el = qs(col === '1' ? '.cm-folders' : '.cm-list', app);
+			var other = qs(col === '1' ? '.cm-list' : '.cm-folders', app);
+			return {
+				kind: 'col',
+				size: el.getBoundingClientRect().width,
+				set: function (w) {
+					var max = app.clientWidth - other.getBoundingClientRect().width - 10 - 320;	// keep 320px for the message
+					layout['col' + col] = Math.round(clamp(w, col === '1' ? 140 : 220, Math.max(col === '1' ? 140 : 220, Math.min(col === '1' ? 420 : 900, max))));
+				},
+				reset: function () { delete layout['col' + col]; },
+				sign: 1
+			};
+		}
+
+		apply();
+		var listHandle = qs('.cm-resize[data-col="2"]', app);
+		if (listHandle && app.classList.contains('cm-view-table')) {
+			listHandle.setAttribute('aria-orientation', 'horizontal');
+		}
+
+		app.addEventListener('pointerdown', function (ev) {
+			var handle = ev.target.closest('.cm-resize');
+			if (!handle || ev.button !== 0) {
+				return;
+			}
+			ev.preventDefault();
+			var t = target(handle);
+			var start = t.kind === 'row' ? ev.clientY : ev.clientX;
+			handle.setPointerCapture(ev.pointerId);
+			handle.classList.add('active');
+			app.classList.add('cm-resizing', 'cm-resizing-' + t.kind);
+			var move = function (e) {
+				t.set(t.size + t.sign * ((t.kind === 'row' ? e.clientY : e.clientX) - start));
+				apply();
+			};
+			var end = function () {
+				handle.removeEventListener('pointermove', move);
+				handle.removeEventListener('pointerup', end);
+				handle.removeEventListener('pointercancel', end);
+				handle.classList.remove('active');
+				app.classList.remove('cm-resizing', 'cm-resizing-' + t.kind);
+				qsa('iframe.convomail-body', app).forEach(fit);
+				save();
+			};
+			handle.addEventListener('pointermove', move);
+			handle.addEventListener('pointerup', end);
+			handle.addEventListener('pointercancel', end);
+		});
+		app.addEventListener('dblclick', function (ev) {
+			// Drafts and Templates: a double click on a row opens it on the compose page
+			var row = ev.target.closest('.cm-row');
+			var rows = row && row.closest('.cm-rows[data-dblopen]');
+			if (rows && !ev.target.closest('.cm-check, .cm-star, .cm-row-action')) {
+				window.location.href = rows.getAttribute('data-dblopen') + '&accountid=' + encodeURIComponent(row.getAttribute('data-accountid'))
+					+ '&folder=' + encodeURIComponent(row.getAttribute('data-folder')) + '&uid=' + encodeURIComponent(row.getAttribute('data-uid'));
+				return;
+			}
+			var handle = ev.target.closest('.cm-resize');
+			if (handle) {
+				target(handle).reset();
+				apply();
+				save();
+			}
+		});
+		app.addEventListener('keydown', function (ev) {
+			var handle = ev.target.closest && ev.target.closest('.cm-resize');
+			if (!handle) {
+				return;
+			}
+			var t = target(handle);
+			var keys = t.keys || (t.kind === 'row' ? { ArrowUp: 1, ArrowDown: -1 } : { ArrowRight: 1, ArrowLeft: -1 });
+			if (keys[ev.key]) {
+				ev.preventDefault();
+				t.set(t.size + keys[ev.key] * (ev.shiftKey ? 64 : 16));
+				apply();
+				save();
+			}
+		});
+	}
+
+	/**
+	 * Full-page message view (phones, direct links): same toolbar, then back to the list
+	 */
+	function bindPageView(view) {
+		view.addEventListener('convomail:reload', function () { window.location.reload(); });
+		view.addEventListener('click', function (ev) {
+			var btn = ev.target.closest('[data-cm-action]');
+			if (btn && btn.tagName !== 'SELECT') {
+				ev.preventDefault();
+				send(btn.getAttribute('data-cm-action'), btn.dataset);
+			}
+			if (ev.target.closest('[data-cm-showimages]')) {
+				ev.preventDefault();
+				window.location.href = view.getAttribute('data-self') + '&showimages=1';
+			}
+		});
+		view.addEventListener('change', function (ev) {
+			var sel = ev.target.closest('select[data-cm-action="move"]');
+			if (!sel || !sel.value) {
+				return;
+			}
+			if (sel.value !== '__new__') {
+				send('move', { dest: sel.value });
+				return;
+			}
+			// "New folder...": create it (ajax/folder.php), then move there
+			var name = window.prompt(view.getAttribute('data-new-folder-prompt'));
+			sel.value = '';
+			if (!name || !name.trim()) {
+				return;
+			}
+			var fd = new FormData();
+			fd.append('token', view.getAttribute('data-token'));
+			fd.append('accountid', view.getAttribute('data-accountid'));
+			fd.append('action', 'create');
+			fd.append('name', name.trim());
+			fetch(view.getAttribute('data-ajax-action').replace(/action\.php$/, 'folder.php'), { method: 'POST', body: fd, credentials: 'same-origin' })
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (res.ok) {
+						send('move', { dest: res.name });
+					} else {
+						notify(res.error || 'Error', false);
+					}
+				});
+		});
+		function send(action, data) {
+			var fd = new FormData();
+			fd.append('token', view.getAttribute('data-token'));
+			fd.append('accountid', view.getAttribute('data-accountid'));
+			fd.append('folder', view.getAttribute('data-folder'));
+			fd.append('action', action);
+			fd.append('uids[]', view.getAttribute('data-uid'));
+			['dest', 'projectid', 'socid', 'contactids'].forEach(function (k) {
+				if (data && data[k]) { fd.append(k, data[k]); }
+			});
+			fetch(view.getAttribute('data-ajax-action'), { method: 'POST', body: fd, credentials: 'same-origin' })
+				.then(function (r) { return r.json(); })
+				.then(function (res) {
+					if (!res.ok) {
+						notify(res.error || 'Error', false);
+					} else if (res.removed && res.removed.length || action === 'unread') {
+						window.location.href = view.getAttribute('data-list');
+					} else {
+						window.location.reload();
+					}
+				});
+		}
 	}
 })();
