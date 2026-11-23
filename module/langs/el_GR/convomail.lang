@@ -333,10 +333,10 @@ ConvomailNotInDolibarr = Δεν βρέθηκε %s στο Dolibarr.
 ConvomailCreateThirdParty = Δημιουργία τρίτου μέρους
 ConvomailAddContactTo = Προσθήκη ως επαφή του %s
 ConvomailAddContactPick = Προσθήκη ως επαφή…
-ConvomailThirdPartyCreated = Δημιουργήθηκε %s 
+ConvomailThirdPartyCreated = Δημιουργήθηκε %s
 ConvomailAddAsContact = Προσθήκη ως επαφή
 ConvomailLogThisEmailOn = Καταγραφή αυτού του email στο %s
-ConvomailContactAdded = Προστέθηκε νεα επαφή %s.
+ConvomailContactAdded = Προστέθηκε νέα επαφή %s.
 
 # Web form mail (sender in Reply-To)
 ConvomailReplyTo = Απάντηση σε
