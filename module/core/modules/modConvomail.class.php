@@ -50,7 +50,7 @@ class modConvomail extends DolibarrModules
 
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Send email from Dolibarr through each user's own mailbox and log every message to the agenda";
-		$this->version = '1.3.0';
+		$this->version = '1.4.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'fa-envelope';	// not 'email': themes draw its fa-at faded (opacity 0.7); also the top menu icon (MAIN_MODULE_CONVOMAIL_ICON)
 
@@ -122,6 +122,21 @@ class modConvomail extends DolibarrModules
 				'status'        => 1,
 				'test'          => 'isModEnabled("convomail")',
 				'priority'      => 40,
+			),
+			// Deletes the mailboxes of users who left once their period is over (Employee leaving, accounts.php)
+			1 => array(
+				'label'         => 'ConvomailCronDeleteLeaving',
+				'jobtype'       => 'method',
+				'class'         => '/convomail/class/convomailaccount.class.php',
+				'objectname'    => 'ConvomailAccount',
+				'method'        => 'cronDeleteLeaving',
+				'parameters'    => '',
+				'comment'       => 'ConvomailCronDeleteLeavingHelp',
+				'frequency'     => 1,
+				'unitfrequency' => 86400,
+				'status'        => 1,
+				'test'          => 'isModEnabled("convomail")',
+				'priority'      => 50,
 			),
 		);
 
