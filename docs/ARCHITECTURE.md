@@ -1,6 +1,6 @@
 # Convomail architecture
 
-How the module is put together: what each part does, what it stores, and how information moves between Dolibarr, the user's mail server and the agenda. Written for whoever (person or agent) works on it next. State as of **0.12.1**.
+How the module is put together: what each part does, what it stores, and how information moves between Dolibarr, the user's mail server and the agenda. Written for whoever (person or agent) works on it next. State as of **1.4.0**.
 
 - What the module does for users: [README.md](../README.md)
 - What is planned: [ROADMAP.md](ROADMAP.md)
@@ -129,7 +129,7 @@ Keys: `(entity, fk_user)`, `status`.
 | Column | Meaning |
 |---|---|
 | `fk_account` | Account it was sent from or read in |
-| `folder`, `uid` | Where it was in the mailbox (Sent copy for sent mail; may be empty) |
+| `folder`, `uid` | Where it was in the mailbox (Sent copy for sent mail; may be empty); `uid` is BIGINT (1.4.0: IMAP UIDs are unsigned 32-bit integers) |
 | `msgid` | Message-ID without angle brackets (see section 4) |
 | `in_reply_to` | Parent Message-ID. Used to build threads in the project Emails tab |
 | `direction` | 1 out (sent), 2 in (received, filed) |
@@ -192,7 +192,7 @@ Keys: unique `(fk_account, msgid)`, unique `track_key`, `fk_actioncomm`.
 | Class (file) | Responsibility | Key methods |
 |---|---|---|
 | `modConvomail` (core/modules) | Descriptor | `init()` loads `sql/`, activates `AC_EMAIL`, `delete_menus()`, `_init()`; `remove()` |
-| `ConvomailAccount` | Account CRUD (CommonObject `*Common()`), password crypto, access, host allowlist | `fetchDefaultForUser()`, `fetchAllForUser()`, `canBeUsedBy()`, `checkHostAllowed()` / `isHostAllowed()`, `setPassword()`, `getPassword()`, `countForUser()` (tab badge), `clearSessionCache()` |
+| `ConvomailAccount` | Account CRUD (CommonObject `*Common()`), password crypto, access, host allowlist | `fetchDefaultForUser()`, `fetchAllForUser()`, `canBeUsedBy()`, `readAccess()` (returns `own`/`shared`/`all`/`hierarchy`/`''`), `canRead()`, `canSend()`, `canManage()`, `checkHostAllowed()` / `isHostAllowed()`, `setPassword()`, `getPassword()`, `countForUser()` (tab badge), `clearSessionCache()` |
 | `ConvomailCollector` | Automatic filing through core's Email Collector | `enable()` creates/updates `CONVOMAIL<id>_IN` (INBOX, `isanswer`) and `_OUT` (Sent folder, `isanswer` + `withouttrackingidinmsgid`, `code=SET:AC_EMAIL`), action `recordevent` with `userownerid/authorid=SET:<owner>`; `disable()`, `sync()` (called by `ConvomailAccount::update()` and on shared-mailbox access changes), `remove()` (by `delete()`), `status()`, `runNow()`, `refreshAll()` (on upgrade). Collector label "Convomail: Inbox/Sent replies of <address> (<owner or shared mailbox>)"; the description names the Dolibarr user (or the shared mailbox's users) and what the job does |
 | `ConvomailOAuth` | OAuth sign-in (Google, Microsoft 365) on top of core's phpoauth services and `DoliStorage` | `providers()`, `availableApps()`, `appFor()`, `authorizationUrl()`, `handleCallback()`, `accessToken()` (refresh 5 minutes before expiry), `status()`, `disconnect()`, `mailSettings()` (in-memory settings for `CMailFile`) |
 | `ConvomailMessage` | Link row CRUD | `fetchByMsgid()`, `fetchByTrackKey()` (no entity filter: public URL), `fetchByActioncomm()`, `countForProject()` (tab badge) |
@@ -366,7 +366,7 @@ The response is JSON `{ok, removed, message, events}`; the JS updates rows and t
 3. `message.php` checks access to the third party (`restrictedArea`) and offers adding the person as a contact (`splitName()`, unless a contact has the address) and logging the email. POST `action=confirm_thirdparty` creates the contact (`Contact::create`) and calls `ConvomailView::logMessage()` with the third party and contact, then returns to the mailbox on that message.
 
 ### 6.10 Shared mailboxes and automatic filing
-- **Access:** `ConvomailAccount::canRead()` (own, granted shared, or `account->admin`), `canSend()` (own, or shared granted with `can_send`; admins need a grant too), `canManage()` (owner of a personal account, or `account->admin`). `fetchAllUsableBy()` gives the mailbox switcher and compose's From list; `convomail_get_usable_account()` falls back to granted shared mailboxes.
+- **Access:** `ConvomailAccount::canRead()` (true when `readAccess()` is non-empty), `readAccess()` returns `'own'` (owner), `'shared'` (access grant), `'all'` (`account->readall`, or `account->admin` before `CONVOMAIL_RIGHTS_SPLIT`), or `'hierarchy'` (`account->readhierarchy`, the account owner is a subordinate). `convomail_log_read()` logs `all` and `hierarchy` reads as a `CONVOMAIL_READ_OTHER` security event (once per session per account). `canSend()` (own, or shared granted with `can_send`; admins need a grant too), `canManage()` (owner of a personal account, or `account->admin`). `fetchAllUsableBy()` gives the mailbox switcher and compose's From list; `convomail_get_usable_account()` falls back to granted shared mailboxes.
 - **Dashboard** `accounts.php` (`account->admin`): every account, shared mailbox create/edit (same form as the user tab, `convomail_account_form_fields()`), access grants, automatic filing cells.
 - **Automatic filing:** `convomail_filing_cell()` / `convomail_filing_actions()` (`filing_on|filing_off|filing_run`, owner or admin) drive `ConvomailCollector`. Core's cron *Email collector* runs the collectors every 5 minutes; Convomail's cron *ConvomailCronRefreshTokens* (`ConvomailOAuth::refreshTokens()`, every 5 minutes) refreshes OAuth tokens expiring within 15 minutes, because the collector can't. OAuth collectors need `MAIN_IMAP_USE_PHPIMAP=1` (button on the dashboard).
 
@@ -435,14 +435,16 @@ The AJAX files define `NOTOKENRENEWAL`, so the page's CSRF token stays valid for
   |---|---|---|
   | 19428201 | `account->read` | Use and manage own mail accounts; see the Mailbox |
   | 19428202 | `message->send` | Send from Dolibarr |
-  | 19428203 | `account->admin` | Manage (and read) every user's accounts |
+  | 19428203 | `account->admin` | Manage every user's accounts (create, edit, delete, test, shared mailbox access, automatic filing); implies `readall` until `CONVOMAIL_RIGHTS_SPLIT` is set (1.4.0 migration) |
+  | 19428204 | `account->readall` | Read the mailboxes of all users (1.4.0); each read is logged as a `CONVOMAIL_READ_OTHER` security event, once per session per account |
+  | 19428205 | `account->readhierarchy` | Read the mailboxes of the user's direct and indirect subordinates (1.4.0); same logging |
 
 - **Menus:** top `Mailbox` (`mainmenu=convomail`, position 87, after Agenda), with left entries Inbox, Sent, Compose email and My mail accounts (`user_accounts.php?id=__USER_ID__`). Also "Compose email" under Agenda. The tab shows to everyone with `account->read`: a per-user "has an account" condition is not possible in core (UPSTREAM item 9).
 - **Tabs:**
   - `user:+convomail` (Mail accounts, badge `ConvomailAccount::countForUser`);
   - `project:+convomail_emails` (Emails, badge `ConvomailMessage::countForProject`);
   - `email_admin:+convomail`, shown only with the [core patch](../patches/README.md).
-- **Hook contexts:** `elementproperties`, `thirdpartycard`, `contactcard`, `projectcard`, `actioncard`, `usercard`, `toprightmenu`.
+- **Hook contexts:** `elementproperties`, `thirdpartycard`, `contactcard`, `projectcard`, `actioncard`, `usercard`, `toprightmenu`, `composeemail` (compose page), `convomailmessage` (message page; 1.4.0).
 - **Settings** (`llx_const`):
 
   | Name | Default | Effect |
@@ -462,6 +464,8 @@ The AJAX files define `NOTOKENRENEWAL`, so the page's CSRF token stays valid for
   | `CONVOMAIL_INVOICE_READ` | 0 (unset) | **Fill from the invoice** on the supplier invoice panel (6.13) |
   | `CONVOMAIL_INVOICE_AI` | 0 (unset) | **Read with AI** for invoice PDFs without e-invoice data, through core's AI module (6.13) |
   | `CONVOMAIL_DEBUG_MODE` | 0 | Enables `ajax/debug.php`, and records an IMAP protocol trace per user in `<documents>/convomail/temp/imap-trace-<user id>.log` (`?mode=imaptrace`) |
+  | `CONVOMAIL_RIGHTS_SPLIT` | 0 | Set to 1 by `migrateReadRights()` (1.4.0) once the read-all right has been distributed to users who had the admin right; before this flag is set, `account->admin` still implies `readall` |
+  | `CONVOMAIL_ACTIVATED_AC_EMAIL` | 0 | Set to 1 by `init()` when Convomail activates the AC_EMAIL event type (which is inactive by default in core); `remove()` deactivates it only when this is set |
 
 - **In-memory only, during one send:** `MAIN_MAIL_SENDMODE_CONVOMAIL`, `MAIN_MAIL_SMTP_SERVER_CONVOMAIL`, `_PORT_`, `MAIN_MAIL_SMTPS_ID_`, `_PW_`, `_AUTH_TYPE_`, `MAIN_MAIL_EMAIL_TLS_`, `_STARTTLS_`, `MAIN_MAIL_EMAIL_SMTP_ALLOW_SELF_SIGNED_CONVOMAIL`, `MAIN_MAIL_ADD_INLINE_IMAGES_IF_DATA`. For OAuth accounts also `MAIN_MAIL_SMTPS_OAUTH_SERVICE_CONVOMAIL` and `OAUTH_<TYPE>-convomail<id>_ID/_SECRET/_TENANT/_SCOPE/_URLCALLBACK`. They are never written to `llx_const`.
 - **User params:** `CONVOMAIL_UNREAD_MODE`, `CONVOMAIL_UNREAD_ACCOUNTS`, `CONVOMAIL_UNREAD_PREVIEW` (6.2c), `CONVOMAIL_COMBINED_ACCOUNTS`, `CONVOMAIL_LAST_VIEW` (`combined` while the user is in the Combined Inbox; 6.2d), `CONVOMAIL_LAST_ACCOUNT`, `CONVOMAIL_LAST_FOLDER`, `CONVOMAIL_PAGE_SIZE` (overrides the setup default), `CONVOMAIL_HIDE_CONVERSATION` (1 = the user turned **Show conversation** off; unset = on).
